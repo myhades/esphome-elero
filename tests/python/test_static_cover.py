@@ -99,6 +99,9 @@ def test_complete_native_codegen(tmp_path):
     assert "register_light" not in source
     assert "mongoose" not in source
     assert "elero_web" not in source
+    assert "TiltStepButton(raffstore, true)" in source
+    assert "TiltStepButton(raffstore, false)" in source
+    assert source.count("App.register_button(") == 2
     assert "debug_send(command, frame_type, type2, hop" in source
 
 
@@ -111,3 +114,10 @@ def test_explicit_headers_are_preserved():
     config = ACTION_SCHEMA({"command": 0x21, "type": 0x44, "type2": 7, "hop": 8})
     assert config["type2"] == 7
     assert config["hop"] == 8
+
+
+def test_tilt_false_does_not_create_step_buttons():
+    from elero.cover import add_tilt_buttons
+    config = add_tilt_buttons({"name": "Curtain", "tilt": False})
+    assert "tilt_up_button" not in config
+    assert "tilt_down_button" not in config

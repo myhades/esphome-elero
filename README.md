@@ -21,7 +21,13 @@ Travel durations of 0s disable position control. After measuring both full trave
 times, set `state_strategy: timed` with `endpoint_margin` to settle missing terminal
 feedback as an estimate. `feedback` only trusts reported endpoints. RF Status and
 Position Source exposes provenance; tilt is a directional step, not a measured
-angle. Native tilt endpoints and the two template buttons send the same steps.
+angle. `tilt: true` automatically creates two native Tilt Up/Down Step buttons.
+There is no native tilt slider because the motor does not report a measured angle.
+The native cover API requires finite position floats: before height is known it
+uses a 50% transport placeholder, explicitly labeled in the status diagnostic and
+startup log. This is neither measured nor estimated height. The registry stays
+unknown and rejects intermediate targets until referenced; real feedback replaces
+the placeholder. No NaN is sent in native cover position/tilt fields.
 
 Development: `uv sync --locked`, `uv run pytest`, and
 `cmake -S tests/unit -B build/native && cmake --build build/native && ctest --test-dir build/native`.

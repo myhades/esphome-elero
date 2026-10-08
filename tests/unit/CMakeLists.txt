@@ -170,8 +170,12 @@ add_executable(test_sx1276_tx_fsm
 )
 target_link_libraries(test_sx1276_tx_fsm GTest::gtest_main)
 
+add_executable(test_native_cover_projection test_native_cover_projection.cpp)
+target_link_libraries(test_native_cover_projection GTest::gtest_main)
+
 # Discover all tests
 include(GoogleTest)
+gtest_discover_tests(test_native_cover_projection)
 gtest_discover_tests(test_cc1101_compat)
 gtest_discover_tests(test_cc1101_tx_fsm)
 gtest_discover_tests(test_cc1101_driver_tx)
@@ -193,6 +197,7 @@ gtest_discover_tests(test_device_registry)
 
 # All test targets
 set(ALL_TEST_TARGETS
+  test_native_cover_projection
   test_cc1101_compat test_cc1101_tx_fsm test_cc1101_driver_tx
   test_freq_conversion test_sx1262_tx_fsm test_sx1276_tx_fsm
   test_packet_vectors test_command_sender test_golden_vectors

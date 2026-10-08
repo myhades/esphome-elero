@@ -1,14 +1,15 @@
 """Static native cover, with explicit RF actions and honest state provenance."""
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import cover, sensor, text_sensor
+from esphome.components import button, cover, sensor, text_sensor
 from esphome.const import CONF_ID
 
 from .. import CONF_REGISTRY_ID, DeviceRegistry, OutputAdapter, elero_ns
 
 DEPENDENCIES = ["elero"]
-AUTO_LOAD = ["sensor", "text_sensor"]
+AUTO_LOAD = ["sensor", "text_sensor", "button"]
 YamlCover = elero_ns.class_("YamlCover", cover.Cover, cg.Component, OutputAdapter)
+TiltStepButton = elero_ns.class_("TiltStepButton", button.Button)
 ACTIONS = ("up", "down", "stop", "tilt_up", "tilt_down", "preset", "check")
 ADDRESS = cv.hex_int_range(min=1, max=0xFFFFFF)
 DURATION = cv.All(cv.positive_time_period_milliseconds, cv.Range(max=cv.TimePeriod(milliseconds=120000)))
@@ -39,7 +40,17 @@ def validate_timing(config):
     return config
 
 
-CONFIG_SCHEMA = cv.All(cover.cover_schema(YamlCover).extend({
+def add_tilt_buttons(config):
+    config = dict(config)
+    if cv.boolean(config.get("tilt", True)):
+        for direction in ("up", "down"):
+            config.setdefault(f"tilt_{direction}_button", {
+                "name": f"{config.get('name', 'Raffstore')} Tilt {direction.title()} Step",
+            })
+    return config
+
+
+CONFIG_SCHEMA = cv.All(add_tilt_buttons, cover.cover_schema(YamlCover).extend({
     cv.GenerateID(CONF_REGISTRY_ID): cv.use_id(DeviceRegistry),
     cv.Required("status_address"): ADDRESS,
     cv.Required("remote_address"): ADDRESS,
@@ -52,6 +63,8 @@ CONFIG_SCHEMA = cv.All(cover.cover_schema(YamlCover).extend({
         cv.positive_time_period_milliseconds,
         cv.Range(min=cv.TimePeriod(milliseconds=1), max=cv.TimePeriod(milliseconds=30000))),
     cv.Optional("tilt", default=True): cv.boolean,
+    cv.Optional("tilt_up_button"): button.button_schema(TiltStepButton),
+    cv.Optional("tilt_down_button"): button.button_schema(TiltStepButton),
     cv.Required("commands"): cv.Schema({cv.Required(action): ACTION_SCHEMA for action in ACTIONS}),
     cv.Optional("rssi"): sensor.sensor_schema(unit_of_measurement="dBm", accuracy_decimals=0, entity_category="diagnostic"),
     cv.Optional("status"): text_sensor.text_sensor_schema(entity_category="diagnostic"),
@@ -100,3 +113,7 @@ async def to_code(config):
         cg.add(var.set_rssi_sensor(await sensor.new_sensor(config["rssi"])))
     if "status" in config:
         cg.add(var.set_status_sensor(await text_sensor.new_text_sensor(config["status"])))
+
+    if config["tilt"]:
+        await button.new_button(config["tilt_up_button"], var, True)
+        await button.new_button(config["tilt_down_button"], var, False)

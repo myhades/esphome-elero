@@ -106,13 +106,3 @@ sensor:
       name: RF RX Drops
     last_rx_age:
       name: RF Last RX Age
-
-button:
-  - platform: template
-    name: Tilt Up Step
-    on_press:
-      - lambda: id(raffstore).tilt_step(true);
-  - platform: template
-    name: Tilt Down Step
-    on_press:
-      - lambda: id(raffstore).tilt_step(false);

@@ -70,11 +70,10 @@ cover:
     command_address: 0x200001
     remote_address: 0x100001
     channel: 17
-    # Use feedback until both full travel durations have been measured.
-    # Then select timed; endpoint estimates remain visibly marked in Status.
+    # Synthetic timing fixture: exercise HA percentage support from unknown boot state.
     state_strategy: feedback
-    open_duration: 0s
-    close_duration: 0s
+    open_duration: 55s
+    close_duration: 55s
     endpoint_margin: 2s
     tilt: true
     # Restore original frame families; long-travel motor acceptance still needs testing.
@@ -104,13 +103,3 @@ sensor:
       name: RF RX Drops
     last_rx_age:
       name: RF Last RX Age
-
-button:
-  - platform: template
-    name: Tilt Up Step
-    on_press:
-      - lambda: id(raffstore).tilt_step(true);
-  - platform: template
-    name: Tilt Down Step
-    on_press:
-      - lambda: id(raffstore).tilt_step(false);

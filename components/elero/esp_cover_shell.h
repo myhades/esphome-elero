@@ -19,7 +19,7 @@
 #ifdef USE_BINARY_SENSOR
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #endif
-#include <cmath>
+#include "native_cover_projection.h"
 #include "device.h"
 #include "device_registry.h"
 #include "cover_sm.h"
@@ -65,6 +65,8 @@ class EspCoverShell : public cover::Cover, public Component {
     }
 #endif
     if (device_ && device_->active) {
+      if (!std::get<CoverDevice>(device_->logic).published.position_known)
+        ESP_LOGW("elero.cover", "Height unknown: native API uses 50%% placeholder until referenced; see position source diagnostic");
       sync_and_publish(state_change::ALL);
     }
   }
@@ -76,7 +78,7 @@ class EspCoverShell : public cover::Cover, public Component {
     const auto &cfg = device_->config;
     auto ctx = cover_context(cfg);
     traits.set_supports_position(cover_sm::has_position_tracking(ctx));
-    traits.set_supports_tilt(cfg.supports_tilt != 0);
+    traits.set_supports_tilt(native_cover_has_tilt(cfg.supports_tilt != 0, cfg.command_profile));
     traits.set_supports_stop(true);
     traits.set_supports_toggle(true);
     traits.set_is_assumed_state(true);
@@ -136,10 +138,11 @@ class EspCoverShell : public cover::Cover, public Component {
 
     if (changes & (state_change::POSITION | state_change::HA_STATE |
                    state_change::OPERATION | state_change::TILT)) {
-      this->position = pub.position_known ? static_cast<float>(pub.position_pct) / PERCENT_SCALE : NAN;
-      if (device_->config.supports_tilt != 0) {
-        this->tilt = device_->config.command_profile == 1 ? NAN :
-            (pub.tilted ? cover_sm::POSITION_OPEN : cover_sm::POSITION_CLOSED);
+      this->position = native_cover_position(pub.position_known, pub.position_pct);
+      // Unadvertised for Raffstore, but keep the wire field finite as well.
+      this->tilt = 0.0f;
+      if (native_cover_has_tilt(device_->config.supports_tilt != 0, device_->config.command_profile)) {
+        this->tilt = pub.tilted ? cover_sm::POSITION_OPEN : cover_sm::POSITION_CLOSED;
       }
       switch (pub.operation) {
         case cover_sm::Operation::IDLE:
@@ -158,9 +161,10 @@ class EspCoverShell : public cover::Cover, public Component {
 #endif
 #ifdef USE_TEXT_SENSOR
     if ((changes & (state_change::STATE_STRING | state_change::POSITION)) && status_sensor_ != nullptr) {
-      char status[160];
-      snprintf(status, sizeof(status), "%s; position=%s; reason=%s", pub.state_string,
-               pub.position_source, pub.transition_reason);
+      char status[192];
+      snprintf(status, sizeof(status), "%s; position=%s; reason=%s%s", pub.state_string,
+               pub.position_source, pub.transition_reason,
+               pub.position_known ? "" : "; native_position=50% placeholder");
       status_sensor_->publish_state(status);
     }
     if ((changes & state_change::PROBLEM) && problem_type_sensor_ != nullptr)

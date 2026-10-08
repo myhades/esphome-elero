@@ -1484,3 +1484,50 @@ TEST_F(DeviceRegistryTest, DebugRejectsInvalidArgumentsBeforeNarrowingOrQueueMut
     EXPECT_FALSE(registry_.debug_send(*dev, 0x10, 0x69, 0, 10, 0x200001, 0, 4, 4));
     EXPECT_EQ(dev->sender.queue_size(), 0u);
 }
+
+// Exercise the actual native adapter, not just a duplicated projection formula.
+#define USE_COVER
+#include "elero/yaml_cover.h"
+
+TEST_F(DeviceRegistryTest, NativeRaffstoreBootNeverPublishesNaNOrClaimsKnownHeight) {
+    auto cfg = make_cover_config(0x300001);
+    cfg.command_profile = 1;
+    cfg.supports_tilt = 1;
+    cfg.open_duration_ms = cfg.close_duration_ms = 55000;
+    YamlCover entity;
+    entity.set_registry(&registry_);
+    entity.set_config(cfg);
+    registry_.add_adapter(&entity);
+    entity.setup();
+    ASSERT_NE(entity.device_, nullptr);
+    EXPECT_TRUE(std::isfinite(entity.position));
+    EXPECT_TRUE(std::isfinite(entity.tilt));
+    EXPECT_GT(entity.publishes, 0u);
+    EXPECT_TRUE(entity.get_traits().get_supports_position());
+    EXPECT_TRUE(entity.get_traits().get_is_assumed_state());
+    EXPECT_FALSE(entity.get_traits().get_supports_tilt());
+    auto &cover = std::get<CoverDevice>(entity.device_->logic);
+    EXPECT_FALSE(cover.position_known);
+    EXPECT_STREQ(cover.published.position_source, "unknown");
+    registry_.set_cover_position(*entity.device_, 0.75f);
+    EXPECT_FALSE(entity.device_->sender.has_pending_commands());
+}
+
+TEST_F(DeviceRegistryTest, NativeRaffstoreConfirmedFeedbackReplacesBootPlaceholder) {
+    auto cfg = make_cover_config(0x300001);
+    cfg.command_profile = 1;
+    cfg.supports_tilt = 1;
+    YamlCover entity;
+    entity.set_registry(&registry_);
+    entity.set_config(cfg);
+    registry_.add_adapter(&entity);
+    entity.setup();
+    registry_.on_rf_packet(make_status_pkt(cfg.dst_address, packet::state::TOP), 1000);
+    EXPECT_FLOAT_EQ(entity.position, 1.0f);
+    EXPECT_TRUE(std::isfinite(entity.tilt));
+    const auto &cover = std::get<CoverDevice>(entity.device_->logic);
+    EXPECT_STREQ(cover.published.position_source, "motor_confirmed");
+    registry_.on_rf_packet(make_status_pkt(cfg.dst_address, packet::state::BOTTOM), 2000);
+    EXPECT_FLOAT_EQ(entity.position, 0.0f);
+    EXPECT_FALSE(entity.get_traits().get_supports_tilt());
+}
