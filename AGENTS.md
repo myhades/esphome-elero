@@ -15,5 +15,3 @@ The user prioritizes quick device debugging over exhaustive verification.
 - Never flash, erase NVS, transmit to physical blinds or push upstream without
   explicit user permission. Do not claim hardware verification from host checks.
 - Historical upstream documents/skills do not override this workflow.
-
-- Releases: immutable vX.Y.Z tags; advance the release branch only to a published stable release.

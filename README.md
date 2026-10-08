@@ -6,12 +6,12 @@ ESP32-S3 N16R8 + CC1101，ESPHome 2026.9.1。通过原生 API 接入 Home Assist
 
 ```yaml
 external_components:
-  - source: github://myhades/esphome-elero@release
+  - source: github://myhades/esphome-elero@main
     components: [elero]
     refresh: 0s
 ```
 
-`release` 跟随最新正式发布；固定版本用 `@v0.1.0`。更新组件后需要重新编译并 OTA。
+`main` 跟随当前代码。更新组件后需要重新编译并 OTA。
 
 参考 [完整配置](configs/raffstore.yaml)，填入自己的 Wi-Fi、API/OTA 凭据、电机地址、遥控器地址和频道。
 
