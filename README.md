@@ -1,8 +1,8 @@
 # Elero Raffstore for ESPHome
 
-ESP32-S3 N16R8 + CC1101，ESPHome 2026.9.1。通过原生 API 接入 Home Assistant，无需 Web UI、Node 或 pnpm。
+ESP32-S3 N16R8 + CC1101, ESPHome 2026.9.1. Native Home Assistant integration without Web UI, Node or pnpm.
 
-## 使用
+## Setup
 
 ```yaml
 external_components:
@@ -11,15 +11,15 @@ external_components:
     refresh: 0s
 ```
 
-`main` 跟随当前代码。更新组件后需要重新编译并 OTA。
+`main` tracks the current code. Recompile and upload via OTA to apply updates.
 
-参考 [完整配置](configs/raffstore.yaml)，填入自己的 Wi-Fi、API/OTA 凭据、电机地址、遥控器地址和频道。
+Start with the [example configuration](configs/raffstore.yaml). Set your Wi-Fi and API/OTA credentials, motor and remote addresses, and channel.
 
-- `state_strategy: timed`：按方向、当前位置和全程时间计算剩余行程，加上 `endpoint_margin` 后结束估算；未知位置使用完整行程。终点 RF 反馈仍优先生效。
-- `state_strategy: feedback`：等待电机反馈，未收到时有运动超时保护。
-- HA 的 100% 是全开，0% 是全关；百分比来自时间估算。启动位置未知时显示 50% 占位。
-- 不用 Tilt 时省略 `tilt` 和两条 Tilt 命令。需要时设置 `tilt: true`、`commands.tilt_up/tilt_down`，用按钮的 `action: tilt_up/tilt_down` 控制。
-- RSSI 放在 `sensor`，查询按钮放在 `button`，均用 `platform: elero` 和 `cover_id` 关联窗帘。
-- `text_sensor` 可分别暴露 `rf_state`、`position_source`、`transition_reason`；合并为 RSSI 属性可用 [HA 模板](configs/ha-rssi-attributes.yaml)。
+- `state_strategy: timed`: estimates remaining travel from position, direction and full travel duration, then adds `endpoint_margin`. Unknown positions use full travel time. RF endpoint feedback takes precedence.
+- `state_strategy: feedback`: waits for motor feedback, with a movement timeout if none arrives.
+- HA uses 100% for fully open and 0% for fully closed. Intermediate positions are time estimates. Unknown startup position displays a 50% placeholder.
+- Omit `tilt` and both tilt commands when unused. To enable it, set `tilt: true`, configure `commands.tilt_up/tilt_down`, and add buttons with `action: tilt_up/tilt_down`.
+- Configure RSSI under `sensor` and the status-query button under `button`, using `platform: elero` and `cover_id` to select the cover.
+- Under `text_sensor`, expose `rf_state`, `position_source` and `transition_reason` separately. Use the [HA template](configs/ha-rssi-attributes.yaml) to combine them as RSSI attributes.
 
-设备配置以 YAML 为准，旧 NVS 数据保留。已实机确认上下和 STOP；Tilt 尚未确认。
+YAML is authoritative; legacy NVS data is preserved. Up, down and STOP have been confirmed on the user's motor; tilt remains unverified.
