@@ -45,7 +45,7 @@ async def to_code(config):
         if source.is_file() and source.suffix in {".cpp", ".h", ".py"}:
             digest.update(source.relative_to(root).as_posix().encode())
             digest.update(source.read_bytes().replace(b"\r\n", b"\n"))
-    cg.add(var.set_version(f"raffstore+{digest.hexdigest()[:12]}"))
+    cg.add(var.set_version(f"raffstore-0.1.0+{digest.hexdigest()[:12]}"))
     registry = cg.new_Pvariable(config[CONF_REGISTRY_ID])
     cg.add(registry.set_yaml_mode(True))
     cg.add(registry.set_hub(var))

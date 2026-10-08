@@ -63,6 +63,7 @@ struct Context {
     uint32_t movement_timeout_ms{120000};     ///< Force idle after this long
     uint32_t post_stop_cooldown_ms{3000};     ///< Ignore transient RF after STOP
     uint32_t endpoint_margin_ms{0};          ///< 0 disables calibrated endpoint fallback
+    bool position_known{false};            ///< Unknown origin requires a full travel interval
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

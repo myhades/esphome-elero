@@ -1,56 +1,25 @@
-# Personal Elero Raffstore component
+# Elero Raffstore for ESPHome
 
-ESPHome **2026.9.1**, ESP32-S3 N16R8, CC1101. Native HA cover, diagnostics and
-API RF debugging. Start from `configs/raffstore.yaml`; keep your own device name,
-Wi-Fi/API/OTA credentials and RF addresses. The example contains synthetic addresses.
+ESP32-S3 N16R8 + CC1101，ESPHome 2026.9.1。通过原生 API 接入 Home Assistant，无需 Web UI、Node 或 pnpm。
 
-## Fast iteration
+## 使用
 
-- Change RF command/type/type2/hop/destination in HA's native API debug action:
-  **no compile and no OTA**. This affects only that call, not normal cover controls.
-- Change firmware or permanent YAML: build once from the same YAML path.
-- Upload the already-built firmware separately if needed; upload does not compile.
-- No automatic test/build pipeline on push. GitHub firmware builds are manual.
-
-```sh
-uv sync --locked
-uv run python scripts/dev.py check path/to/device.yaml
-uv run python scripts/dev.py build path/to/device.yaml
-uv run python scripts/dev.py upload path/to/device.yaml --device DEVICE_IP
-uv run python scripts/dev.py logs path/to/device.yaml --device DEVICE_IP
-# Or build + upload in one explicit command:
-uv run python scripts/dev.py deploy path/to/device.yaml --device DEVICE_IP
+```yaml
+external_components:
+  - source: github://myhades/esphome-elero@release
+    components: [elero]
+    refresh: 0s
 ```
 
-`check` only generates C++; `build` never uploads. Keep caches and the same config
-path. ESPHome may still rebuild when framework/core options or component sets
-change; this wrapper does not bypass required rebuilds. Two optional smoke checks:
-`uv run pytest -q`. No CMake/GoogleTest/WSL or per-commit firmware builds.
+`release` 跟随最新正式发布；固定版本用 `@v0.1.0`。更新组件后需要重新编译并 OTA。
 
-## Behavior
+参考 [完整配置](configs/raffstore.yaml)，填入自己的 Wi-Fi、API/OTA 凭据、电机地址、遥控器地址和频道。
 
-YAML is authoritative; old V3/V4 device NVS records stay untouched for rollback.
-0x44 uses channel addressing and defaults to type2=0x10/hop=0; 0x69/0x6A use the
-explicit destination and default to type2=0/hop=0x0A. Physical acceptance remains
-unverified. TX success means radio completion, not motor acknowledgment.
+- `state_strategy: timed`：按方向、当前位置和全程时间计算剩余行程，加上 `endpoint_margin` 后结束估算；未知位置使用完整行程。终点 RF 反馈仍优先生效。
+- `state_strategy: feedback`：等待电机反馈，未收到时有运动超时保护。
+- HA 的 100% 是全开，0% 是全关；百分比来自时间估算。启动位置未知时显示 50% 占位。
+- 不用 Tilt 时省略 `tilt` 和两条 Tilt 命令。需要时设置 `tilt: true`、`commands.tilt_up/tilt_down`，用按钮的 `action: tilt_up/tilt_down` 控制。
+- RSSI 放在 `sensor`，查询按钮放在 `button`，均用 `platform: elero` 和 `cover_id` 关联窗帘。
+- `text_sensor` 可分别暴露 `rf_state`、`position_source`、`transition_reason`；合并为 RSSI 属性可用 [HA 模板](configs/ha-rssi-attributes.yaml)。
 
-Both travel durations at 0s disable position control. `state_strategy: timed`
-uses measured travel durations plus margin; `feedback` waits for RF endpoints.
-`tilt` defaults to false; omit both tilt commands when unused. `preset` is removed
-from YAML (its old NVS slot is preserved for rollback). For tilt, enable `tilt: true`,
-configure both tilt commands and add `button: platform: elero` entries with
-`cover_id` and `action: tilt_up` / `tilt_down`. At unknown boot
-height the native cover displays a labeled 50% API placeholder; the registry and
-status diagnostic remain unknown until referenced. This is not measured height.
-
-Debug bursts use the existing sender/counter, accept 1–3 packets with bounded
-transport retries, reject invalid arguments, and preserve YAML/NVS. STOP can
-cancel pending logical work; already-posted RF work cannot be retracted.
-
-RSSI is configured under `sensor` with `platform: elero`, `cover_id` and `name`;
-its default icon is `mdi:wifi`. A diagnostic query button uses `platform: elero`,
-`cover_id` and `name` under `button`, with no lambda. Diagnostics under `text_sensor`
-use `cover_id` and the optional `rf_state`, `position_source`, `transition_reason`
-fields. Native ESPHome sensor messages cannot carry custom HA attributes; use the
-HA template in `configs/ha-rssi-attributes.yaml` to combine these into one display
-entity. Adjust its source entity IDs to those actually assigned by HA.
+设备配置以 YAML 为准，旧 NVS 数据保留。已实机确认上下和 STOP；Tilt 尚未确认。

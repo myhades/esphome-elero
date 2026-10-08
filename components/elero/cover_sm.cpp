@@ -225,10 +225,12 @@ State on_tick(const State &state, uint32_t now, const Context &ctx) {
         [&](const Idle &) -> State { return state; },
 
         [&](const Opening &s) -> State {
-            // Full calibrated travel is conservative even when the start is unknown.
+            // Use the remaining distance from the movement origin; unknown height uses full travel.
             // This settles the estimate only; it never fabricates an RF endpoint.
             const bool fallback = ctx.endpoint_margin_ms > 0 && has_position_tracking(ctx);
-            if (fallback && (now - s.start_ms) >= uint64_t{ctx.open_duration_ms} + ctx.endpoint_margin_ms)
+            const float remaining = ctx.position_known ? 1.0f - s.start_position : 1.0f;
+            if (fallback && (now - s.start_ms) >=
+                ctx.open_duration_ms * remaining + ctx.endpoint_margin_ms)
                 return Idle{POSITION_OPEN, true, true};
             if (!fallback && (now - s.start_ms) >= ctx.movement_timeout_ms) {
                 float pos = position_during_opening(
@@ -239,10 +241,12 @@ State on_tick(const State &state, uint32_t now, const Context &ctx) {
         },
 
         [&](const Closing &s) -> State {
-            // Full calibrated travel is conservative even when the start is unknown.
+            // Use the remaining distance from the movement origin; unknown height uses full travel.
             // This settles the estimate only; it never fabricates an RF endpoint.
             const bool fallback = ctx.endpoint_margin_ms > 0 && has_position_tracking(ctx);
-            if (fallback && (now - s.start_ms) >= uint64_t{ctx.close_duration_ms} + ctx.endpoint_margin_ms)
+            const float remaining = ctx.position_known ? s.start_position : 1.0f;
+            if (fallback && (now - s.start_ms) >=
+                ctx.close_duration_ms * remaining + ctx.endpoint_margin_ms)
                 return Idle{POSITION_CLOSED, true, true};
             if (!fallback && (now - s.start_ms) >= ctx.movement_timeout_ms) {
                 float pos = position_during_closing(

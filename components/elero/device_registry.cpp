@@ -983,6 +983,7 @@ void DeviceRegistry::loop(uint32_t now) {
 
 void DeviceRegistry::loop_cover_(Device &dev, CoverDevice &cover, uint32_t now) {
     auto ctx = cover_context(dev.config);
+    ctx.position_known = cover.position_known;
 
     // 1. Tick — check movement timeout and post-stop cooldown
     bool was_stopping = std::holds_alternative<cover_sm::Stopping>(cover.state);
