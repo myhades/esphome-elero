@@ -81,3 +81,11 @@ If you're upgrading from a version where devices were defined under `cover: - pl
 ## Credits
 
 Based on protocol research by [QuadCorei8085/elero_protocol](https://github.com/QuadCorei8085/elero_protocol) (MIT), [stanleypa/eleropy](https://github.com/stanleypa/eleropy) (GPLv3), and [andyboeh/esphome-elero](https://github.com/andyboeh/esphome-elero).
+
+### Fork engineering build
+
+The embedded UI is built from local sources with Node and pnpm 10.32.1.
+Run `pnpm install --frozen-lockfile` and `pnpm build` in
+`components/elero_web/frontend/app` before compiling firmware.
+ESPHome rejects stale or mismatched assets and attempts a local rebuild.
+See [engineering checkpoints](docs/RAFFSTORE-ENGINEERING.md) for validation and rollback limitations.

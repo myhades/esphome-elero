@@ -25,14 +25,32 @@ jobs:
         working-directory: components/elero_web/frontend/app
         run: mise exec node pnpm -- pnpm install --frozen-lockfile
 
+      - name: Frontend tests and checks
+        working-directory: components/elero_web/frontend/app
+        run: |
+          pnpm test
+          pnpm lint
+          pnpm typecheck
+          pnpm exec playwright install --with-deps chromium
+          pnpm test:browser
+
       - name: Build frontend
         working-directory: components/elero_web/frontend/app
         run: mise exec node pnpm -- pnpm build
 
+      - name: Verify reproducible UI header
+        working-directory: components/elero_web/frontend/app
+        run: |
+          sha256sum ../../elero_web_ui.h > /tmp/elero-ui.sha256
+          pnpm build
+          sha256sum --check /tmp/elero-ui.sha256
+
       - uses: actions/upload-artifact@v4
         with:
           name: elero_web_ui
-          path: components/elero_web/elero_web_ui.h
+          path: |
+            components/elero_web/elero_web_ui.h
+            components/elero_web/elero_web_ui.manifest.json
           retention-days: 1
 
   # ESPHome compile tests for each platform
@@ -50,6 +68,7 @@ jobs:
           - test.esp32-minimal
           - test.esp32-mqtt
           - test.esp32-nvs
+          - test.esp32-s3-n16r8
     steps:
       - uses: actions/checkout@v4
 

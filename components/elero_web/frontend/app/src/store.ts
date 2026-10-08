@@ -1,3 +1,4 @@
+import { appendBounded, CAPTURE_LIMIT, downloadText } from './lib/diagnostics'
 import { signal, computed, batch } from '@preact/signals'
 import type {
   ConfigData, RfData, DeviceType, CrudEventData, DeviceUpsertedData,
@@ -163,6 +164,10 @@ export const devices = signal<Map<string, Device>>(new Map())
 export const groups = signal<Map<string, GroupConfig>>(new Map())
 
 export const rfPackets = signal<RfPacketWithTimestamp[]>([])
+export const diagnosticLogs = signal<{ t: number; tag: string; level: number; msg: string }[]>([])
+export const websocketErrors = signal(0)
+export const capturePaused = signal(false)
+export const captureDropped = signal(0)
 
 /// True when NVS config has changed and a reboot is needed to apply in HA (native mode)
 export const rebootNeeded = signal(false)
@@ -376,20 +381,17 @@ export function addRfPacket(pkt: RfPacketWithTimestamp) {
   }
 
   batch(() => {
-    rfPackets.value = [...rfPackets.value, pkt]
+    if (!capturePaused.value) {
+      if (rfPackets.value.length >= CAPTURE_LIMIT) captureDropped.value++
+      rfPackets.value = appendBounded(rfPackets.value, pkt)
+    }
     if (next) devices.value = next
   })
 }
 
 export function clearRfPackets() {
-  const next = new Map<string, Device>()
-  for (const [addr, d] of devices.value) {
-    next.set(addr, d.lastStatus ? { ...d, lastStatus: null } : d)
-  }
-  batch(() => {
-    rfPackets.value = []
-    devices.value = next
-  })
+  rfPackets.value = []
+  captureDropped.value = 0
 }
 
 export function onDeviceUpserted(data: DeviceUpsertedData) {
@@ -506,19 +508,12 @@ function snapshotFilename(snap: ConfigSnapshot): string {
 }
 
 export function onConfigSnapshot(snap: ConfigSnapshot) {
-  // Trigger a download via Blob + anchor click
-  const json = JSON.stringify(snap, null, 2)
-  const blob = new Blob([json], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = snapshotFilename(snap)
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-  const groupCount = snap.groups?.length ?? 0
-  showToast('success', `Backup downloaded (${snap.devices.length} device${snap.devices.length === 1 ? '' : 's'}, ${groupCount} group${groupCount === 1 ? '' : 's'})`)
+  try {
+    downloadText(JSON.stringify(snap, null, 2), snapshotFilename(snap), 'application/json')
+    showToast('success', 'Backup download requested. Check your browser downloads.')
+  } catch (error) {
+    showToast('error', `Backup download failed: ${String(error)}`)
+  }
 }
 
 export function onImportResult(result: ImportResult) {

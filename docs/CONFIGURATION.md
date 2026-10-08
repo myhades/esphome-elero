@@ -279,3 +279,11 @@ switch:
 After flashing, open `http://<device-ip>/elero` to add devices.
 
 See also: [Installation Guide](INSTALLATION.md) | [Backup &amp; Restore](BACKUP-RESTORE.md) | [Migration from YAML](MIGRATION-yaml-to-nvs.md) | [README](../README.md) | [Example YAML](../example.yaml)
+
+### Fork engineering build
+
+The embedded UI is built from local sources with Node and pnpm 10.32.1.
+Run `pnpm install --frozen-lockfile` and `pnpm build` in
+`components/elero_web/frontend/app` before compiling firmware.
+ESPHome rejects stale or mismatched assets and attempts a local rebuild.
+See [engineering checkpoints](RAFFSTORE-ENGINEERING.md) for validation and rollback limitations.

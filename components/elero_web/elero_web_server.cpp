@@ -466,17 +466,7 @@ void EleroWebServer::handle_ws_message(struct mg_connection *c, struct mg_ws_mes
         return false;
       }
 
-      // Route through registry for known devices (non-blocking, coordinated TX)
-      auto *registry = this->parent_->get_registry();
-      if (registry != nullptr) {
-        Device *dev = registry->find(dst_addr);
-        if (dev != nullptr) {
-          this->dispatch_device_command_(*dev, raw_command);
-          return true;
-        }
-      }
-
-      // Unknown address → raw TX (blocking, debug only)
+      // Explicit debug commands preserve caller framing, including known destinations.
       uint8_t payload_1 = parse_hex_or(root, "payload_1", packet::defaults::PAYLOAD_1);
       uint8_t payload_2 = parse_hex_or(root, "payload_2", packet::defaults::PAYLOAD_2);
       uint8_t type2_val = parse_hex_or(root, "type2", packet::defaults::TYPE2);
@@ -485,7 +475,11 @@ void EleroWebServer::handle_ws_message(struct mg_connection *c, struct mg_ws_mes
       bool success = this->parent_->send_raw_command(
           dst_addr, src_addr, channel, raw_command,
           payload_1, payload_2, msg_type, type2_val, hop);
-      ESP_LOGI(TAG, "Raw TX to 0x%06x cmd=0x%02x: %s", dst_addr, raw_command, success ? "OK" : "FAIL");
+      this->ws_send(c, "tx_queued", json::build_json([&](JsonObject result) {
+        result["accepted"] = success;
+        result["dst"] = hex_str(dst_addr);
+      }));
+      ESP_LOGI(TAG, "Raw TX queue to 0x%06x cmd=0x%02x: %s", dst_addr, raw_command, success ? "accepted (not motor acknowledgement)" : "rejected");
       return true;
     }
 
@@ -643,6 +637,9 @@ std::string EleroWebServer::build_rf_json(const RfPacketInfo &pkt) {
     root["command"] = hex_str8(pkt.command);
     root["state"] = hex_str8(pkt.state);
     root["cnt"] = pkt.cnt;
+    root["dir"] = "rx";
+    root["lqi"] = pkt.lqi;
+    root["crc"] = pkt.crc_ok;
     root["rssi"] = round_rssi(pkt.rssi);
     root["hop"] = hex_str8(pkt.hop);
     root["raw"] = raw_hex;

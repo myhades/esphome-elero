@@ -1,3 +1,5 @@
+import { createPortal } from 'preact/compat'
+import { copyText } from '@/lib/diagnostics'
 import { useSignal } from '@preact/signals'
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip'
 import { type Column } from './ui/data-table'
@@ -29,21 +31,26 @@ const deviceTypeIcons: Record<AppDeviceType, typeof Blinds | null> = {
 export function CopyPacketBtn({ pkt }: { pkt: RfPacketWithTimestamp }) {
   const copied = useSignal(false)
 
-  const onClick = () => {
-    const { received_at: _, ...rest } = pkt as unknown as Record<string, unknown>
-    void navigator.clipboard.writeText(JSON.stringify(rest, null, 2))
-    copied.value = true
-    setTimeout(() => { copied.value = false }, 1500)
+  const fallback = useSignal('')
+  const onClick = async () => {
+    copied.value = false
+    try {
+      await copyText(JSON.stringify(pkt, null, 2))
+      copied.value = true
+      fallback.value = ''
+      setTimeout(() => { copied.value = false }, 1500)
+    } catch (error) { fallback.value = String(error) }
   }
 
   return (
-    <Tooltip>
+    <><Tooltip>
       <TooltipTrigger>
         <button
           className={cn(
             'flex size-6 items-center justify-center rounded transition-colors',
             copied.value ? 'text-success' : 'text-primary/60 hover:text-primary hover:bg-muted'
           )}
+          aria-label="Copy packet JSON"
           onClick={onClick}
         >
           {copied.value ? <CheckCircle2 className="size-3" /> : <Copy className="size-3" />}
@@ -51,6 +58,11 @@ export function CopyPacketBtn({ pkt }: { pkt: RfPacketWithTimestamp }) {
       </TooltipTrigger>
       <TooltipContent className="right-0 left-auto translate-x-0">Copy packet JSON</TooltipContent>
     </Tooltip>
+    {fallback.value && createPortal(<div role="dialog" aria-label="Copy packet manually" className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"><div className="w-full max-w-lg rounded-xl bg-background p-5 shadow-lg">
+      <p>{fallback.value}</p>
+      <textarea className="my-3 h-56 w-full rounded border p-2 font-mono text-xs" aria-label="Packet JSON manual copy" readOnly value={JSON.stringify(pkt, null, 2)} onFocus={e => e.currentTarget.select()} />
+      <button onClick={() => { fallback.value = '' }}>Close</button>
+    </div></div>, document.body)}</>
   )
 }
 
@@ -92,6 +104,9 @@ export function buildFullColumns(
       value: (pkt) => pkt.received_at ?? pkt.t,
       render: (pkt) => <span className="text-muted-foreground">{formatTime(pkt.received_at)}</span>,
     },
+    { key: 'dir', label: 'Direction', value: pkt => pkt.dir ?? 'unknown', render: pkt => <span>{pkt.dir ?? 'unknown'}</span> },
+    { key: 'quality', label: 'LQI / CRC', render: pkt => <span>{pkt.lqi ?? '-'} / {pkt.crc == null ? 'unknown' : pkt.crc ? 'valid' : 'invalid'}</span> },
+    { key: 'cnt', label: 'Counter', render: pkt => <span>{pkt.cnt}</span> },
     {
       key: 'source', label: 'Source', sortable: true, filter: 'select',
       value: (pkt) => configNames[pkt.src] || pkt.src,
@@ -103,14 +118,14 @@ export function buildFullColumns(
       render: (pkt) => <AddressCell addr={pkt.dst} name={configNames[pkt.dst]} deviceType={addressTypes[pkt.dst] ?? 'unknown'} />,
     },
     {
-      key: 'channel', label: 'CH', sortable: true, filter: 'select',
+      key: 'channel', label: 'Header CH', sortable: true, filter: 'select',
       value: (pkt) => pkt.channel != null ? String(pkt.channel) : '',
       render: (pkt) => <span className="text-muted-foreground">{pkt.channel ?? '-'}</span>,
     },
     {
       key: 'type', label: 'Type', sortable: true, filter: 'select',
       value: (pkt) => getMsgTypeLabel(pkt.type),
-      render: (pkt) => <span className="text-muted-foreground">{getMsgTypeLabel(pkt.type)}</span>,
+      render: (pkt) => <span className="text-muted-foreground">{getMsgTypeLabel(pkt.type)} ({pkt.type})</span>,
     },
     {
       key: 'command', label: 'Command', sortable: true, filter: 'select',
@@ -154,7 +169,7 @@ export function buildCompactColumns(
     {
       key: 'type', label: 'Type', sortable: true,
       value: (pkt) => getMsgTypeLabel(pkt.type),
-      render: (pkt) => <span className="text-muted-foreground">{getMsgTypeLabel(pkt.type)}</span>,
+      render: (pkt) => <span className="text-muted-foreground">{getMsgTypeLabel(pkt.type)} ({pkt.type})</span>,
     },
     {
       key: 'detail', label: 'Detail', sortable: true,

@@ -1,9 +1,10 @@
+import { appendBounded } from './lib/diagnostics'
 import type { CmdPayload, RawPayload, UpsertDevicePayload, RemoveDevicePayload, RestartPayload, SetHubConfigPayload, DeviceAction, StateChangedData, HubConfigEventData, ExportConfigPayload, ImportConfigPayload, ConfigSnapshot, ImportResult, LearnInStartPayload, LearnInConfirmUpPayload, LearnInConfirmDownPayload, LearnInCancelPayload, LearnInStateData, UpsertGroupPayload, RemoveGroupPayload, GroupCmdPayload, GroupConfig, GroupRemovedData, ErrorData } from '@/generated'
 import {
   setConnected, setDevices, addRfPacket,
   onDeviceUpserted, onDeviceRemoved, onStateChanged, onHubConfig,
   onConfigSnapshot, onImportResult, onLearnInState, onGroupUpserted, onGroupRemoved,
-  devices, showToast,
+  devices, showToast, diagnosticLogs, websocketErrors,
   type Device,
 } from './store'
 
@@ -41,9 +42,23 @@ export function initWs() {
   }
 
   socket.onmessage = (e) => {
-    const { event, data } = JSON.parse(e.data)
+    let message
+    try { message = JSON.parse(e.data) } catch {
+      websocketErrors.value++
+      showToast('error', 'Malformed WebSocket message; see diagnostics error count.')
+      return
+    }
+    if (!message || typeof message.event !== 'string' || !message.data) {
+      websocketErrors.value++
+      return
+    }
+    const { event, data } = message
     if (event === 'config') {
       setDevices(data)
+    } else if (event === 'tx_queued') {
+      showToast(data.accepted ? 'success' : 'error', data.accepted ? 'TX queued; motor acknowledgement not verified.' : 'TX queue rejected the command.')
+    } else if (event === 'log') {
+      if (typeof data.msg === 'string' && typeof data.tag === 'string') diagnosticLogs.value = appendBounded(diagnosticLogs.value, { t: Number(data.t), tag: data.tag.slice(0, 64), level: Number(data.level), msg: data.msg.slice(0, 2048) }, 300)
     } else if (event === 'rf') {
       data.received_at = Date.now()
       addRfPacket(data)
@@ -76,10 +91,13 @@ export function initWs() {
 function send(payload: CmdPayload | RawPayload | UpsertDevicePayload | RemoveDevicePayload | RestartPayload | SetHubConfigPayload | ExportConfigPayload | ImportConfigPayload | LearnInStartPayload | LearnInConfirmUpPayload | LearnInConfirmDownPayload | LearnInCancelPayload | UpsertGroupPayload | RemoveGroupPayload | GroupCmdPayload) {
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload))
+  } else {
+    showToast('error', 'Gateway disconnected: command was not sent.')
   }
 }
 
 export function sendRawCommand(params: Omit<RawPayload, 'type'>) {
+  if (!confirm('Send this decoded RF command? This can move the motor. Framing is taken from the selected fields; this is not ciphertext replay.')) return
   send({ type: 'raw', ...params })
 }
 

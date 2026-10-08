@@ -205,6 +205,9 @@ function replayPacket(pkt: RfPacketWithTimestamp, device: Device) {
     src_address: device.remote,
     channel: device.channel,
     command: pkt.command ?? '0x00',
+    msg_type: pkt.type,
+    type2: pkt.type2,
+    hop: pkt.hop,
   })
 }
 
@@ -349,7 +352,7 @@ export function DeviceExpandedPanel({ device }: { device: Device }) {
                   <th className="pb-1 pr-3 font-medium">Command</th>
                   <th className="pb-1 pr-3 font-medium">Type</th>
                   <th className="pb-1 pr-3 font-medium">RSSI</th>
-                  <th className="pb-1 font-medium text-right">Replay</th>
+                  <th className="pb-1 font-medium text-right">Re-send</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
@@ -371,7 +374,7 @@ export function DeviceExpandedPanel({ device }: { device: Device }) {
                             <RotateCcw className="size-3" />
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent>Replay as hub</TooltipContent>
+                        <TooltipContent>Re-send decoded command (new counter; default payload bytes)</TooltipContent>
                       </Tooltip>
                     </td>
                   </tr>

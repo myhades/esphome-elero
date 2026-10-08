@@ -1,5 +1,14 @@
-
+import {RfDirection} from './RfDirection';
 interface RfData {
+  'dir'?: RfDirection;
+  /**
+   * Received link quality, absent on older firmware
+   */
+  'lqi'?: number;
+  /**
+   * Received CRC validity, absent on older firmware
+   */
+  'crc'?: boolean;
   /**
    * Timestamp in milliseconds since boot (millis())
    * @example 1234567

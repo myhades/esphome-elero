@@ -334,7 +334,6 @@ function RawTxCard() {
   const type = useSignal('0x6a')
   const type2 = useSignal('0x00')
   const hop = useSignal('0x0a')
-  const sent = useSignal(false)
 
   const isFormValid = useComputed(() =>
     isValidHex(dstAddr.value) &&
@@ -360,8 +359,6 @@ function RawTxCard() {
       type2: type2.value,
       hop: hop.value,
     })
-    sent.value = true
-    setTimeout(() => { sent.value = false }, 1500)
   }
 
   return (
@@ -581,10 +578,10 @@ function RawTxCard() {
           <Button
             onClick={handleSendRaw}
             disabled={!isFormValid.value}
-            className={cn('gap-2', sent.value && 'bg-green-600 hover:bg-green-600')}
+            className="gap-2"
           >
             <Send className="size-4" />
-            {sent.value ? 'Sent!' : 'Send'}
+            Send debug command
           </Button>
         </div>
       </div>

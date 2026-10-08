@@ -9,6 +9,7 @@ export function DashboardNav() {
 
   const tabs = [
     { id: 'manage' as const, label: 'Manage', icon: List, count: counts.all },
+    { id: 'packets' as const, label: 'Diagnostics', icon: List },
     { id: 'hub' as const, label: 'Hub', icon: Cpu },
   ]
 

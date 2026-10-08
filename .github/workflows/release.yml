@@ -52,4 +52,5 @@ jobs:
         run: |
           gh release upload "${{ needs.release-please.outputs.tag_name }}" \
             components/elero_web/elero_web_ui.h \
+            components/elero_web/elero_web_ui.manifest.json \
             --clobber

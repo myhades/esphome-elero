@@ -33,3 +33,8 @@ components/elero_web/mongoose.h
 
 # Frontend build artifact (downloaded from GitHub release at build time)
 components/elero_web/elero_web_ui.h
+
+components/elero_web/elero_web_ui.manifest.json
+
+components/elero_web/frontend/app/test-results/
+components/elero_web/frontend/app/playwright-report/

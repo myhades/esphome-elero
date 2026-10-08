@@ -981,11 +981,24 @@ components:
           description: Removed group id.
           examples: ["grp_living_k8x2p1"]
 
+    RfDirection:
+      type: string
+      enum: [rx, tx]
+
     RfData:
       type: object
       additionalProperties: false
       required: [t, src, dst, channel, type, type2, command, state, cnt, rssi, hop, raw]
       properties:
+        dir:
+          $ref: "#/components/schemas/RfDirection"
+          description: RF direction, absent on older firmware
+        lqi:
+          type: integer
+          description: Received link quality, absent on older firmware
+        crc:
+          type: boolean
+          description: Received CRC validity, absent on older firmware
         t:
           type: integer
           description: Timestamp in milliseconds since boot (millis())
