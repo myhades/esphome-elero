@@ -16,14 +16,28 @@ CoverStateSnapshot compute_cover_snapshot(const Device &dev, uint32_t now) {
 
     // Stopping = user just hit stop. Don't let stale last_state_raw (still
     // BOTTOM from before movement) show "closed" — blind is mid-travel.
+    const auto *idle = std::get_if<cover_sm::Idle>(&cover.state);
+    const bool estimated_endpoint = idle && idle->estimated_endpoint;
+    const bool confirmed = idle && cover.position_confirmed && !estimated_endpoint &&
+        ((pos == cover_sm::POSITION_OPEN && (dev.rf.last_state_raw == packet::state::TOP ||
+                                            dev.rf.last_state_raw == packet::state::TOP_TILT)) ||
+         (pos == cover_sm::POSITION_CLOSED && (dev.rf.last_state_raw == packet::state::BOTTOM ||
+                                              dev.rf.last_state_raw == packet::state::BOTTOM_TILT)));
+    const bool known = cover.position_known || estimated_endpoint || confirmed;
     const char *ha_state = std::holds_alternative<cover_sm::Stopping>(cover.state)
         ? "open"
         : ha_cover_state_str(op, dev.rf.last_state_raw);
 
+    if (estimated_endpoint) ha_state = pos == 0.0f ? "closed" : "open";
+    if (!known && op == cover_sm::Operation::IDLE) ha_state = "unknown";
     auto *pt = problem_type_str(dev.rf.last_state_raw);
 
     return CoverStateSnapshot{
         .position = pos,
+        .position_known = known,
+        .position_source = confirmed ? "motor_confirmed" : known ? "time_estimated" : "unknown",
+        .transition_reason = estimated_endpoint ? "calibrated_timeout" : cover.transition_reason,
+        .response_age_ms = now - dev.rf.last_seen_ms,
         .ha_state = ha_state,
         .operation = op,
         .tilted = cover.tilted,
@@ -67,7 +81,11 @@ LightStateSnapshot compute_light_snapshot(const Device &dev, uint32_t now) {
 
 #ifdef ELERO_HAS_JSON
 void CoverStateSnapshot::to_json(JsonObject obj) const {
-    obj["position"] = position;
+    if (position_known) obj["position"] = position;
+    else obj["position"] = nullptr;
+    obj["position_source"] = position_source;
+    obj["transition_reason"] = transition_reason;
+    obj["response_age_ms"] = response_age_ms;
     obj["ha_state"] = ha_state;
     obj["tilted"] = tilted;
     obj["is_problem"] = is_problem;
@@ -126,7 +144,13 @@ uint16_t diff_and_update_cover(const CoverStateSnapshot &snap, CoverDevice::Publ
     // compile-time string literals returned by pure functions.
     uint16_t changes = 0;
 
-    int pos_pct = static_cast<int>(snap.position * PERCENT_SCALE);
+    int pos_pct = snap.position_known ? static_cast<int>(snap.position * PERCENT_SCALE) : -1;
+    if (pub.position_source != snap.position_source || pub.transition_reason != snap.transition_reason) {
+        changes |= state_change::POSITION;
+        pub.position_source = snap.position_source;
+        pub.transition_reason = snap.transition_reason;
+    }
+    pub.position_known = snap.position_known;
     if (pub.position_pct != pos_pct) {
         changes |= state_change::POSITION;
         pub.position_pct = pos_pct;

@@ -28,7 +28,9 @@ constexpr float NO_TARGET = -1.0f;        ///< No intermediate target position
 // ═══════════════════════════════════════════════════════════════════════════════
 
 struct Idle {
-    float position{0.5f};  ///< Position (0=closed, 1=open, 0.5=unknown at boot)
+    float position{0.5f};  ///< Internal estimate; validity lives on CoverDevice
+    bool suppress_moving{false};
+    bool estimated_endpoint{false};
 };
 
 struct Opening {
@@ -60,6 +62,7 @@ struct Context {
     uint32_t close_duration_ms{0};      ///< Time for full close (0 = no position tracking)
     uint32_t movement_timeout_ms{120000};     ///< Force idle after this long
     uint32_t post_stop_cooldown_ms{3000};     ///< Ignore transient RF after STOP
+    uint32_t endpoint_margin_ms{0};          ///< 0 disables calibrated endpoint fallback
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -14,10 +14,9 @@ namespace pkt = esphome::elero::packet;
 // HELPERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-static elero::Device make_cover_device(float position = sm::POSITION_CLOSED,
+static void make_cover_device(elero::Device &dev, float position = sm::POSITION_CLOSED,
                                         uint8_t last_state_raw = 0,
                                         float rssi = -50.0f) {
-    elero::Device dev;
     dev.active = true;
     dev.config.type = elero::DeviceType::COVER;
     dev.config.open_duration_ms = 10000;
@@ -26,16 +25,16 @@ static elero::Device make_cover_device(float position = sm::POSITION_CLOSED,
     dev.logic = elero::CoverDevice{};
     auto &cover = std::get<elero::CoverDevice>(dev.logic);
     cover.state = sm::Idle{position};
+    cover.position_known = true;
+    cover.position_confirmed = true;
     dev.rf.last_state_raw = last_state_raw;
     dev.rf.last_rssi = rssi;
     dev.rf.last_seen_ms = 1000;
-    return dev;
 }
 
-static elero::Device make_light_device(bool on = false,
+static void make_light_device(elero::Device &dev, bool on = false,
                                         float brightness = 0.0f,
                                         uint8_t last_state_raw = 0) {
-    elero::Device dev;
     dev.active = true;
     dev.config.type = elero::DeviceType::LIGHT;
     dev.config.dim_duration_ms = 5000;
@@ -49,7 +48,6 @@ static elero::Device make_light_device(bool on = false,
     dev.rf.last_state_raw = last_state_raw;
     dev.rf.last_rssi = -60.0f;
     dev.rf.last_seen_ms = 2000;
-    return dev;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -57,7 +55,8 @@ static elero::Device make_light_device(bool on = false,
 // ═══════════════════════════════════════════════════════════════════════════════
 
 TEST(CoverSnapshot, IdleOpenPositionReportsOpen) {
-    auto dev = make_cover_device(sm::POSITION_OPEN, pkt::state::TOP);
+    elero::Device dev;
+    make_cover_device(dev, sm::POSITION_OPEN, pkt::state::TOP);
     auto snap = elero::compute_cover_snapshot(dev, 5000);
 
     EXPECT_FLOAT_EQ(snap.position, sm::POSITION_OPEN);
@@ -66,7 +65,8 @@ TEST(CoverSnapshot, IdleOpenPositionReportsOpen) {
 }
 
 TEST(CoverSnapshot, IdleClosedPositionReportsClosed) {
-    auto dev = make_cover_device(sm::POSITION_CLOSED, pkt::state::BOTTOM);
+    elero::Device dev;
+    make_cover_device(dev, sm::POSITION_CLOSED, pkt::state::BOTTOM);
     auto snap = elero::compute_cover_snapshot(dev, 5000);
 
     EXPECT_FLOAT_EQ(snap.position, sm::POSITION_CLOSED);
@@ -74,7 +74,8 @@ TEST(CoverSnapshot, IdleClosedPositionReportsClosed) {
 }
 
 TEST(CoverSnapshot, IdleIntermediatePositionReportsOpen) {
-    auto dev = make_cover_device(0.5f, pkt::state::INTERMEDIATE);
+    elero::Device dev;
+    make_cover_device(dev, 0.5f, pkt::state::INTERMEDIATE);
     auto snap = elero::compute_cover_snapshot(dev, 5000);
 
     EXPECT_FLOAT_EQ(snap.position, 0.5f);
@@ -82,7 +83,8 @@ TEST(CoverSnapshot, IdleIntermediatePositionReportsOpen) {
 }
 
 TEST(CoverSnapshot, OpeningReportsOpening) {
-    auto dev = make_cover_device();
+    elero::Device dev;
+    make_cover_device(dev);
     auto &cover = std::get<elero::CoverDevice>(dev.logic);
     cover.state = sm::Opening{sm::POSITION_CLOSED, 1000};
 
@@ -94,7 +96,8 @@ TEST(CoverSnapshot, OpeningReportsOpening) {
 }
 
 TEST(CoverSnapshot, ClosingReportsClosing) {
-    auto dev = make_cover_device(sm::POSITION_OPEN);
+    elero::Device dev;
+    make_cover_device(dev, sm::POSITION_OPEN);
     auto &cover = std::get<elero::CoverDevice>(dev.logic);
     cover.state = sm::Closing{sm::POSITION_OPEN, 1000};
 
@@ -109,7 +112,8 @@ TEST(CoverSnapshot, ClosingReportsClosing) {
 // so last_state_raw still says TOP/BOTTOM from before movement started.
 // ha_state must be "open" (not "closed" from stale BOTTOM).
 TEST(CoverSnapshot, StoppingWithStaleTopRawReportsOpen) {
-    auto dev = make_cover_device(sm::POSITION_OPEN, pkt::state::TOP);
+    elero::Device dev;
+    make_cover_device(dev, sm::POSITION_OPEN, pkt::state::TOP);
     auto &cover = std::get<elero::CoverDevice>(dev.logic);
     cover.state = sm::Stopping{0.8f, 5000};
 
@@ -119,7 +123,8 @@ TEST(CoverSnapshot, StoppingWithStaleTopRawReportsOpen) {
 }
 
 TEST(CoverSnapshot, StoppingWithStaleBottomRawReportsOpen) {
-    auto dev = make_cover_device(sm::POSITION_CLOSED, pkt::state::BOTTOM);
+    elero::Device dev;
+    make_cover_device(dev, sm::POSITION_CLOSED, pkt::state::BOTTOM);
     auto &cover = std::get<elero::CoverDevice>(dev.logic);
     cover.state = sm::Stopping{0.2f, 5000};
 
@@ -128,7 +133,8 @@ TEST(CoverSnapshot, StoppingWithStaleBottomRawReportsOpen) {
 }
 
 TEST(CoverSnapshot, ProblemStateDetected) {
-    auto dev = make_cover_device(0.5f, pkt::state::BLOCKING);
+    elero::Device dev;
+    make_cover_device(dev, 0.5f, pkt::state::BLOCKING);
     auto snap = elero::compute_cover_snapshot(dev, 5000);
 
     EXPECT_TRUE(snap.is_problem);
@@ -136,7 +142,8 @@ TEST(CoverSnapshot, ProblemStateDetected) {
 }
 
 TEST(CoverSnapshot, OverheatedProblem) {
-    auto dev = make_cover_device(0.5f, pkt::state::OVERHEATED);
+    elero::Device dev;
+    make_cover_device(dev, 0.5f, pkt::state::OVERHEATED);
     auto snap = elero::compute_cover_snapshot(dev, 5000);
 
     EXPECT_TRUE(snap.is_problem);
@@ -144,7 +151,8 @@ TEST(CoverSnapshot, OverheatedProblem) {
 }
 
 TEST(CoverSnapshot, TimeoutProblem) {
-    auto dev = make_cover_device(0.5f, pkt::state::TIMEOUT);
+    elero::Device dev;
+    make_cover_device(dev, 0.5f, pkt::state::TIMEOUT);
     auto snap = elero::compute_cover_snapshot(dev, 5000);
 
     EXPECT_TRUE(snap.is_problem);
@@ -152,7 +160,8 @@ TEST(CoverSnapshot, TimeoutProblem) {
 }
 
 TEST(CoverSnapshot, NoProblemForNormalState) {
-    auto dev = make_cover_device(sm::POSITION_OPEN, pkt::state::TOP);
+    elero::Device dev;
+    make_cover_device(dev, sm::POSITION_OPEN, pkt::state::TOP);
     auto snap = elero::compute_cover_snapshot(dev, 5000);
 
     EXPECT_FALSE(snap.is_problem);
@@ -160,7 +169,8 @@ TEST(CoverSnapshot, NoProblemForNormalState) {
 }
 
 TEST(CoverSnapshot, TiltedFlag) {
-    auto dev = make_cover_device(sm::POSITION_OPEN, pkt::state::TOP_TILT);
+    elero::Device dev;
+    make_cover_device(dev, sm::POSITION_OPEN, pkt::state::TOP_TILT);
     auto &cover = std::get<elero::CoverDevice>(dev.logic);
     cover.tilted = true;
 
@@ -169,26 +179,30 @@ TEST(CoverSnapshot, TiltedFlag) {
 }
 
 TEST(CoverSnapshot, DeviceClassDefault) {
-    auto dev = make_cover_device();
+    elero::Device dev;
+    make_cover_device(dev);
     auto snap = elero::compute_cover_snapshot(dev, 5000);
     EXPECT_STREQ(snap.device_class, "shutter");
 }
 
 TEST(CoverSnapshot, DeviceClassBlind) {
-    auto dev = make_cover_device();
+    elero::Device dev;
+    make_cover_device(dev);
     dev.config.ha_device_class = 1;  // blind
     auto snap = elero::compute_cover_snapshot(dev, 5000);
     EXPECT_STREQ(snap.device_class, "blind");
 }
 
 TEST(CoverSnapshot, StateStringFromRf) {
-    auto dev = make_cover_device(sm::POSITION_OPEN, pkt::state::TOP);
+    elero::Device dev;
+    make_cover_device(dev, sm::POSITION_OPEN, pkt::state::TOP);
     auto snap = elero::compute_cover_snapshot(dev, 5000);
     EXPECT_STREQ(snap.state_string, "top");
 }
 
 TEST(CoverSnapshot, RssiPassthrough) {
-    auto dev = make_cover_device(sm::POSITION_CLOSED, 0, -75.5f);
+    elero::Device dev;
+    make_cover_device(dev, sm::POSITION_CLOSED, 0, -75.5f);
     auto snap = elero::compute_cover_snapshot(dev, 5000);
     EXPECT_FLOAT_EQ(snap.rssi, -75.5f);
 }
@@ -198,7 +212,8 @@ TEST(CoverSnapshot, RssiPassthrough) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 TEST(LightSnapshot, OffState) {
-    auto dev = make_light_device(false);
+    elero::Device dev;
+    make_light_device(dev, false);
     auto snap = elero::compute_light_snapshot(dev, 5000);
 
     EXPECT_FALSE(snap.is_on);
@@ -206,7 +221,8 @@ TEST(LightSnapshot, OffState) {
 }
 
 TEST(LightSnapshot, OnState) {
-    auto dev = make_light_device(true, 0.75f);
+    elero::Device dev;
+    make_light_device(dev, true, 0.75f);
     auto snap = elero::compute_light_snapshot(dev, 5000);
 
     EXPECT_TRUE(snap.is_on);
@@ -214,7 +230,8 @@ TEST(LightSnapshot, OnState) {
 }
 
 TEST(LightSnapshot, ProblemDetected) {
-    auto dev = make_light_device(true, 1.0f, pkt::state::OVERHEATED);
+    elero::Device dev;
+    make_light_device(dev, true, 1.0f, pkt::state::OVERHEATED);
     auto snap = elero::compute_light_snapshot(dev, 5000);
 
     EXPECT_TRUE(snap.is_problem);
@@ -222,7 +239,8 @@ TEST(LightSnapshot, ProblemDetected) {
 }
 
 TEST(LightSnapshot, NoProblem) {
-    auto dev = make_light_device(true, 1.0f, pkt::state::LIGHT_ON);
+    elero::Device dev;
+    make_light_device(dev, true, 1.0f, pkt::state::LIGHT_ON);
     auto snap = elero::compute_light_snapshot(dev, 5000);
 
     EXPECT_FALSE(snap.is_problem);
@@ -230,7 +248,8 @@ TEST(LightSnapshot, NoProblem) {
 }
 
 TEST(LightSnapshot, RssiPassthrough) {
-    auto dev = make_light_device();
+    elero::Device dev;
+    make_light_device(dev);
     auto snap = elero::compute_light_snapshot(dev, 5000);
     EXPECT_FLOAT_EQ(snap.rssi, -60.0f);
 }

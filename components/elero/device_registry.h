@@ -99,6 +99,7 @@ class DeviceRegistry {
 
     /// Dispatch a tilt command to a cover device.
     void command_cover_tilt(Device &dev);
+    void command_cover_tilt_step(Device &dev, bool up);
 
     /// Dispatch a command byte to a light device (on/off + FSM + enqueue).
     void command_light(Device &dev, uint8_t cmd_byte);

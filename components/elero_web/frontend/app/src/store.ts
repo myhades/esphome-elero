@@ -259,7 +259,7 @@ function blindToDevice(b: BlindConfig): Device {
     name: b.name, channel: b.channel, remote: b.remote, pairings: makePairings(b.remote, b.channel),
     open_ms: b.open_ms, close_ms: b.close_ms, supports_tilt: b.supports_tilt,
     lastStatus: b.state && b.state !== '0x00'
-      ? { state: b.state, rssi: b.rssi } as RfPacketWithTimestamp
+      ? { state: b.state, rssi: b.rssi, ha_state: b.ha_state, position: b.position, position_source: b.position_source, transition_reason: b.transition_reason } as unknown as RfPacketWithTimestamp
       : null,
   })
 }
@@ -426,8 +426,8 @@ export function addRfPacket(pkt: RfPacketWithTimestamp) {
       // Type correction: if we see a light state, correct cover→light
       const name = resolveStateName(pkt.state)
       const correctedType: DeviceType =
-        (name === 'light_on' || name === 'bottom_tilt') ? 'light' : existing.type
-      mut().set(pkt.src, { ...existing, type: correctedType, lastStatus: pkt })
+        (name === 'light_on' && existing.updated_at === null) ? 'light' : existing.type
+      mut().set(pkt.src, { ...existing, type: correctedType, lastStatus: { ...existing.lastStatus, ...pkt } })
     }
     // Do NOT create devices from status packets — byte offset 6 is not the RF channel.
     // Discovery happens from COMMAND packets only (which carry correct channel).
@@ -502,6 +502,7 @@ export function onStateChanged(data: StateChangedData) {
   // This is the optimistic update — overridden by the next real RF packet.
   const lastStatus = {
     ...existing.lastStatus,
+    ...data,
     state: data.state,
     ha_state: data.ha_state,
     rssi: data.rssi,

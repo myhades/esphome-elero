@@ -20,6 +20,7 @@
 #ifdef USE_BINARY_SENSOR
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #endif
+#include <cmath>
 #include "device.h"
 #include "device_registry.h"
 #include "cover_sm.h"
@@ -105,7 +106,11 @@ class EspCoverShell : public cover::Cover, public Component {
     }
 
     if (call.get_tilt().has_value()) {
-      registry_->command_cover_tilt(*device_);
+      if (device_->config.command_profile == 1) {
+        const float target = *call.get_tilt();
+        if (target == 0.0f || target == 1.0f)
+          registry_->command_cover_tilt_step(*device_, target == 1.0f);
+      } else registry_->command_cover_tilt(*device_);
       return;
     }
 
@@ -131,9 +136,10 @@ class EspCoverShell : public cover::Cover, public Component {
 
     if (changes & (state_change::POSITION | state_change::HA_STATE |
                    state_change::OPERATION | state_change::TILT)) {
-      this->position = static_cast<float>(pub.position_pct) / PERCENT_SCALE;
+      this->position = pub.position_known ? static_cast<float>(pub.position_pct) / PERCENT_SCALE : NAN;
       if (device_->config.supports_tilt != 0) {
-        this->tilt = pub.tilted ? cover_sm::POSITION_OPEN : cover_sm::POSITION_CLOSED;
+        this->tilt = device_->config.command_profile == 1 ? NAN :
+            (pub.tilted ? cover_sm::POSITION_OPEN : cover_sm::POSITION_CLOSED);
       }
       switch (pub.operation) {
         case cover_sm::Operation::IDLE:
@@ -151,8 +157,12 @@ class EspCoverShell : public cover::Cover, public Component {
       rssi_sensor_->publish_state(static_cast<float>(pub.rssi_rounded));
 #endif
 #ifdef USE_TEXT_SENSOR
-    if ((changes & state_change::STATE_STRING) && status_sensor_ != nullptr)
-      status_sensor_->publish_state(pub.state_string);
+    if ((changes & (state_change::STATE_STRING | state_change::POSITION)) && status_sensor_ != nullptr) {
+      char status[160];
+      snprintf(status, sizeof(status), "%s; position=%s; reason=%s", pub.state_string,
+               pub.position_source, pub.transition_reason);
+      status_sensor_->publish_state(status);
+    }
     if ((changes & state_change::PROBLEM) && problem_type_sensor_ != nullptr)
       problem_type_sensor_->publish_state(pub.problem_type);
 #endif

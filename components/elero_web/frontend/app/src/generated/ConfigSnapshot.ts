@@ -8,10 +8,10 @@ import {GroupConfig} from './GroupConfig';
  */
 interface ConfigSnapshot {
   /**
-   * Snapshot envelope version (currently 2). Must match the C++
+   * Snapshot envelope version (currently 3). Must match the C++
    * `SNAPSHOT_VERSION` const in `components/elero_web/elero_web_server.cpp` —
    * the import handler rejects newer values it doesn't recognise.
-   * @example 2
+   * @example 3
    */
   'snapshot_version': number;
   /**

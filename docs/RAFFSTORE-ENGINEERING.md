@@ -103,3 +103,23 @@ provisional discoveries are remembered in browser storage (per gateway), with an
 explicit reset; they are not synchronized to other browsers or NVS.
 
 Hardware migration, STOP acceptance and all alternate framing remain unverified.
+
+## State/tilt slice
+
+`endpoint_margin_ms = 0` disables calibrated settling. With both travel durations
+set and a positive margin, a full directional travel duration plus margin settles
+the endpoint as `time_estimated`. It does not send STOP or fabricate TOP/BOTTOM.
+Steady MOVING reports cannot restart it; a new local/observed command or fresh
+START_MOVING report can. Real terminal feedback replaces the estimate. The legacy
+120-second watchdog still applies when calibrated settling is disabled.
+
+Unknown startup position is published as null/unknown (native API uses NaN), not
+50%. Intermediate percentage targets need a known origin. MQTT attributes, web
+state and the native status text explain position provenance and transition reason.
+Raw RF state remains separate. Native and MQTT Raffstore tilt endpoint controls
+send directional steps; intermediate tilt percentages are unsupported and ignored.
+The web UI exposes both directions and a separate preset. Tilt angles are not
+invented. Physical angle/STOP behavior still requires validation.
+
+Snapshot tests previously excluded by upstream now run through the registry test
+harness. Source rollback for this slice is `b2ce521`; the V4 schema is unchanged.

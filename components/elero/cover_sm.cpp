@@ -98,6 +98,8 @@ State on_rf_status(const State &state, uint8_t state_byte, uint32_t now,
             if (s == packet::state::BOTTOM) return Idle{POSITION_CLOSED};
             if (s == packet::state::TOP_TILT) return Idle{POSITION_OPEN};
             if (s == packet::state::BOTTOM_TILT) return Idle{POSITION_CLOSED};
+            if (idle.suppress_moving && (s == packet::state::MOVING_UP ||
+                                         s == packet::state::MOVING_DOWN)) return state;
             if (is_rf_moving_up(s)) return Opening{idle.position, now};
             if (is_rf_moving_down(s)) return Closing{idle.position, now};
             // TILT, INTERMEDIATE, warnings — stay idle
@@ -223,7 +225,12 @@ State on_tick(const State &state, uint32_t now, const Context &ctx) {
         [&](const Idle &) -> State { return state; },
 
         [&](const Opening &s) -> State {
-            if ((now - s.start_ms) >= ctx.movement_timeout_ms) {
+            // Full calibrated travel is conservative even when the start is unknown.
+            // This settles the estimate only; it never fabricates an RF endpoint.
+            const bool fallback = ctx.endpoint_margin_ms > 0 && has_position_tracking(ctx);
+            if (fallback && (now - s.start_ms) >= ctx.open_duration_ms + ctx.endpoint_margin_ms)
+                return Idle{POSITION_OPEN, true, true};
+            if (!fallback && (now - s.start_ms) >= ctx.movement_timeout_ms) {
                 float pos = position_during_opening(
                     s.start_position, s.start_ms, now, ctx.open_duration_ms);
                 return Idle{pos};
@@ -232,7 +239,12 @@ State on_tick(const State &state, uint32_t now, const Context &ctx) {
         },
 
         [&](const Closing &s) -> State {
-            if ((now - s.start_ms) >= ctx.movement_timeout_ms) {
+            // Full calibrated travel is conservative even when the start is unknown.
+            // This settles the estimate only; it never fabricates an RF endpoint.
+            const bool fallback = ctx.endpoint_margin_ms > 0 && has_position_tracking(ctx);
+            if (fallback && (now - s.start_ms) >= ctx.close_duration_ms + ctx.endpoint_margin_ms)
+                return Idle{POSITION_CLOSED, true, true};
+            if (!fallback && (now - s.start_ms) >= ctx.movement_timeout_ms) {
                 float pos = position_during_closing(
                     s.start_position, s.start_ms, now, ctx.close_duration_ms);
                 return Idle{pos};
@@ -242,7 +254,7 @@ State on_tick(const State &state, uint32_t now, const Context &ctx) {
 
         [&](const Stopping &s) -> State {
             if ((now - s.stop_ms) >= ctx.post_stop_cooldown_ms) {
-                return Idle{s.position};
+                return Idle{s.position, ctx.endpoint_margin_ms > 0, false};
             }
             return state;
         },

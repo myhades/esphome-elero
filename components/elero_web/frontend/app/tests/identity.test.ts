@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { addRfPacket, devices, onDeviceUpserted, updateDevice, cancelDeviceDraft, rfPackets, clearRfPackets, type RfPacketWithTimestamp } from '../src/store'
+import { addRfPacket, onStateChanged, devices, onDeviceUpserted, updateDevice, cancelDeviceDraft, rfPackets, clearRfPackets, type RfPacketWithTimestamp } from '../src/store'
 
 test('saved alias suppresses repeated provisional discovery and preserves control channel', () => {
   devices.value = new Map()
@@ -27,4 +27,14 @@ test('draft edits retain persisted identity and cancel restores server-confirmed
   cancelDeviceDraft('0x300001')
   assert.equal(devices.value.get('0x300001')?.name, 'Saved')
   assert.equal(devices.value.get('0x300001')?.save_state, undefined)
+})
+
+test('BOTTOM_TILT preserves saved cover type and RF updates preserve projected state', () => {
+  devices.value = new Map()
+  onDeviceUpserted({ address: '0x300001', device_type: 'cover', updated_at: 1 })
+  onStateChanged({ address: '0x300001', device_type: 'cover', position: 0, position_source: 'time_estimated', ha_state: 'closed' })
+  addRfPacket({ src: '0x300001', dst: '0x100001', channel: 91, type: '0xca', state: '0x0f' } as RfPacketWithTimestamp)
+  const dev = devices.value.get('0x300001')!
+  assert.equal(dev.type, 'cover')
+  assert.equal((dev.lastStatus as unknown as { ha_state: string }).ha_state, 'closed')
 })

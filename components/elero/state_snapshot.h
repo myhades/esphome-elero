@@ -42,7 +42,11 @@ constexpr uint16_t ALL            = 0xFFFF;   ///< Force-publish everything (rec
 // ═══════════════════════════════════════════════════════════════════════════════
 
 struct CoverStateSnapshot {
-    float position;              ///< 0.0–1.0
+    float position;              ///< Internal 0.0–1.0; publish only when position_known
+    bool position_known;
+    const char *position_source;
+    const char *transition_reason;
+    uint32_t response_age_ms;
     const char *ha_state;        ///< "open"/"closed"/"opening"/"closing"
     cover_sm::Operation operation;  ///< IDLE/OPENING/CLOSING
     bool tilted;

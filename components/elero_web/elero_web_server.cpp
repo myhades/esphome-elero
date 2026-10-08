@@ -430,6 +430,10 @@ void EleroWebServer::handle_ws_message(struct mg_connection *c, struct mg_ws_mes
         return true;
       }
 
+      if (strcmp(action_str, "tilt_up") == 0 || strcmp(action_str, "tilt_down") == 0) {
+        registry->command_cover_tilt_step(*dev, strcmp(action_str, "tilt_up") == 0);
+        return true;
+      }
       uint8_t cmd_byte = elero_action_to_command(action_str);
       if (cmd_byte == packet::command::INVALID) {
         ESP_LOGW(TAG, "Unknown action: %s", action_str);

@@ -1,4 +1,5 @@
 import {DeviceType} from './DeviceType';
+import {AnonymousSchema_102} from './AnonymousSchema_102';
 import {HaCoverState} from './HaCoverState';
 import {ProblemType} from './ProblemType';
 import {RfStateName} from './RfStateName';
@@ -20,10 +21,13 @@ interface StateChangedData {
    * Type of device (cover, light, or remote control)
    */
   'device_type': DeviceType;
+  'position_source'?: AnonymousSchema_102;
+  'transition_reason'?: string;
+  'response_age_ms'?: number;
   /**
    * Cover position (0.0 = closed, 1.0 = open). Cover only.
    */
-  'position'?: number;
+  'position'?: number | null;
   /**
    * HA-compatible cover state. Cover only.
    */

@@ -99,9 +99,8 @@ add_executable(test_poll_timer
 )
 target_link_libraries(test_poll_timer GTest::gtest_main)
 
-# State snapshot — excluded from build: state_snapshot.h depends on
-# esphome/components/json/json_util.h which requires ArduinoJson stubs.
-# The test file exists (test_state_snapshot.cpp) but cannot compile on host yet.
+# Snapshot cases share the registry unity-build stubs, including the sender.
+# JSON serialization is guarded by __has_include in the production header.
 
 # DeviceRegistry (command dispatch, RF routing, CRUD, loop logic)
 # Unity-build: test file #includes production .cpp files directly to control stub ordering

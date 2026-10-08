@@ -309,7 +309,7 @@ void MqttAdapter::publish_cover_state_(const Device &dev, uint16_t changes) {
         ++topics;
     }
 
-    if ((changes & state_change::POSITION) &&
+    if ((changes & state_change::POSITION) && pub.position_known &&
         dev.config.open_duration_ms > 0 && dev.config.close_duration_ms > 0) {
         char pos_buf[8];
         snprintf(pos_buf, sizeof(pos_buf), "%d", pub.position_pct);
@@ -334,9 +334,11 @@ void MqttAdapter::publish_cover_state_(const Device &dev, uint16_t changes) {
         ++topics;
     }
 
-    if (changes & (state_change::PROBLEM | state_change::TILT)) {
+    if (changes & (state_change::PROBLEM | state_change::TILT | state_change::POSITION)) {
         std::string attrs = json::build_json([&](JsonObject root) {
             root["tilted"] = pub.tilted;
+            root["position_source"] = pub.position_source;
+            root["transition_reason"] = pub.transition_reason;
             root["device_class"] = ha_cover_class_str(static_cast<HaCoverClass>(dev.config.ha_device_class));
             root["problem_type"] = pub.problem_type;
         });
@@ -344,7 +346,7 @@ void MqttAdapter::publish_cover_state_(const Device &dev, uint16_t changes) {
         ++topics;
     }
 
-    if ((changes & state_change::TILT) && dev.config.supports_tilt != 0) {
+    if ((changes & state_change::TILT) && dev.config.supports_tilt != 0 && dev.config.command_profile == 0) {
         ctx_.publish(DeviceType::COVER, addr, mqtt_topic::TILT_STATE, pub.tilted ? "100" : "0", false);
         ++topics;
     }
@@ -381,10 +383,14 @@ void MqttAdapter::subscribe_cover_commands_(const Device &dev) {
         });
 
     ctx_.subscribe(DeviceType::COVER, addr, mqtt_topic::TILT,
-        [this, addr](const char *, const char *) {
+        [this, addr](const char *, const char *payload) {
             Device *d = registry_->find(addr, DeviceType::COVER);
             if (d == nullptr) return;
-
+            if (d->config.command_profile == 1) {
+                if (strcmp(payload, "0") == 0 || strcmp(payload, "100") == 0)
+                    registry_->command_cover_tilt_step(*d, strcmp(payload, "100") == 0);
+                return;
+            }
             registry_->command_cover_tilt(*d);
         });
 

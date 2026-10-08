@@ -1,4 +1,6 @@
 import {RfActionConfig} from './RfActionConfig';
+import {AnonymousSchema_35} from './AnonymousSchema_35';
+import {HaCoverState} from './HaCoverState';
 interface BlindConfig {
   /**
    * Command destination alias; canonical address is the motor status source
@@ -55,10 +57,17 @@ interface BlindConfig {
    * @example 1234567
    */
   'updated_at'?: number;
+  'position_source'?: AnonymousSchema_35;
+  'transition_reason'?: string;
+  'response_age_ms'?: number;
   /**
    * Last known cover position (0.0 = closed, 1.0 = open)
    */
-  'position'?: number;
+  'position'?: number | null;
+  /**
+   * HA-compatible cover state. Cover only.
+   */
+  'ha_state'?: HaCoverState;
   /**
    * Last known state byte (hex string, e.g. "0x01" = top)
    * @example 0x0d

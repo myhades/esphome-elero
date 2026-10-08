@@ -78,7 +78,9 @@ export function HaStateCell({ device }: { device: Device }) {
   const status = device.lastStatus as Record<string, unknown> | null
   const haState = (status?.ha_state as string | undefined)?.toUpperCase() ?? '—'
   return (
-    <span className="text-[10px] text-muted-foreground">{haState}</span>
+    <span className="text-[10px] text-muted-foreground" title={typeof status?.transition_reason === 'string' ? status.transition_reason : ''}>
+        {haState}<br />{status?.position_source === 'time_estimated' ? 'Estimated' : status?.position_source === 'motor_confirmed' ? 'Motor confirmed' : 'Position unknown'}
+      </span>
   )
 }
 
@@ -104,6 +106,10 @@ export function SignalCell({ device }: { device: Device }) {
 export function BlindControls({ device }: { device: Device }) {
   return (
     <div className="flex items-center gap-1 text-primary">
+      {device.command_profile === 1 && <>
+        <Button variant="ghost" size="sm" disabled={!device.supports_tilt} onClick={() => sendDeviceCommand(device, 'tilt_up')}>Tilt ↑</Button>
+        <Button variant="ghost" size="sm" disabled={!device.supports_tilt} onClick={() => sendDeviceCommand(device, 'tilt_down')}>Tilt ↓</Button>
+      </>}
       <Tooltip>
         <TooltipTrigger>
           <Button variant="ghost" size="icon" className="size-7 text-primary hover:text-primary disabled:text-muted-foreground/40 disabled:pointer-events-none" disabled={!device.supports_tilt} onClick={() => sendDeviceCommand(device, 'tilt')}>

@@ -43,11 +43,17 @@ struct CoverDevice {
     float           target_position{cover_sm::NO_TARGET};  ///< NO_TARGET = no target, 0..1 = intermediate target
     cover_sm::Operation last_direction{cover_sm::Operation::OPENING};  ///< For toggle logic
     bool            tilted{false};
+    bool            position_known{false};
+    bool            position_confirmed{false};
+    const char *transition_reason{"boot"};
 
     /// Last-published state cache. Registry diffs against this to detect changes.
     /// Defaults guarantee non-zero diff on first publish.
     struct Published {
         int position_pct{-1};
+        bool position_known{false};
+        const char *position_source{nullptr};
+        const char *transition_reason{nullptr};
         const char *ha_state{nullptr};
         cover_sm::Operation operation{cover_sm::Operation::IDLE};
         const char *state_string{nullptr};
@@ -131,7 +137,7 @@ struct Device {
 inline cover_sm::Context cover_context(const NvsDeviceConfig &cfg) {
     return {cfg.open_duration_ms, cfg.close_duration_ms,
             packet::timing::TIMEOUT_MOVEMENT,
-            packet::timing::POST_STOP_COOLDOWN_MS};
+            packet::timing::POST_STOP_COOLDOWN_MS, cfg.endpoint_margin_ms};
 }
 
 inline light_sm::Context light_context(const NvsDeviceConfig &cfg) {

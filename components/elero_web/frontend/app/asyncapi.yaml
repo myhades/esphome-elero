@@ -865,10 +865,19 @@ components:
           type: integer
           description: Timestamp (millis()) when last persisted to NVS (0 = YAML-defined)
           examples: [1234567]
+        position_source:
+          type: string
+          enum: [unknown, time_estimated, motor_confirmed]
+        transition_reason:
+          type: string
+        response_age_ms:
+          type: integer
         position:
-          type: number
+          type: [number, "null"]
           format: float
           description: Last known cover position (0.0 = closed, 1.0 = open)
+        ha_state:
+          $ref: "#/components/schemas/HaCoverState"
         state:
           type: string
           description: Last known state byte (hex string, e.g. "0x01" = top)
@@ -1216,8 +1225,15 @@ components:
         device_type:
           $ref: "#/components/schemas/DeviceType"
         # Cover fields (device_type = "cover")
+        position_source:
+          type: string
+          enum: [unknown, time_estimated, motor_confirmed]
+        transition_reason:
+          type: string
+        response_age_ms:
+          type: integer
         position:
-          type: number
+          type: [number, "null"]
           format: float
           description: Cover position (0.0 = closed, 1.0 = open). Cover only.
         ha_state:
@@ -1674,10 +1690,10 @@ components:
         snapshot_version:
           type: integer
           description: |
-            Snapshot envelope version (currently 2). Must match the C++
+            Snapshot envelope version (currently 3). Must match the C++
             `SNAPSHOT_VERSION` const in `components/elero_web/elero_web_server.cpp` —
             the import handler rejects newer values it doesn't recognise.
-          examples: [2]
+          examples: [3]
         exported_at:
           type: integer
           description: Timestamp (millis() since boot on the source device) when exported.
@@ -1882,7 +1898,7 @@ components:
 
     HaCoverState:
       type: string
-      enum: [open, closed, opening, closing, stopped]
+      enum: [open, closed, opening, closing, stopped, unknown]
       description: HA-compatible cover state. Cover only.
 
     ProblemType:
@@ -1911,7 +1927,7 @@ components:
 
     DeviceAction:
       type: string
-      enum: [up, down, open, close, stop, check, tilt, on, off, dim_up, dim_down, int]
+      enum: [up, down, open, close, stop, check, tilt_up, tilt_down, tilt, on, off, dim_up, dim_down, int]
       description: |
         Action to perform on a device:
         - Covers: up/open, down/close, stop, check, tilt, int (intermediate)

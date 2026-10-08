@@ -532,3 +532,32 @@ TEST_F(CoverSmTest, RapidStopThenResumeFromStoppingState) {
     ASSERT_TRUE(std::holds_alternative<sm::Opening>(s));
     EXPECT_NEAR(std::get<sm::Opening>(s).start_position, 0.3f, 0.01f);
 }
+
+TEST_F(CoverSmTest, CalibratedFallbackIsEstimatedAndIgnoresStaleMoving) {
+    ctx.endpoint_margin_ms = 2000;
+    sm::State state = sm::Opening{0.5f, 1000};
+    state = sm::on_tick(state, 12999, ctx);
+    EXPECT_TRUE(sm::is_moving(state));
+    state = sm::on_tick(state, 13000, ctx);
+    ASSERT_TRUE(std::holds_alternative<sm::Idle>(state));
+    EXPECT_TRUE(std::get<sm::Idle>(state).estimated_endpoint);
+    EXPECT_FLOAT_EQ(sm::position(state, 13000, ctx), 1.0f);
+    for (uint32_t now = 14000; now < 20000; now += 2000)
+        state = sm::on_rf_status(state, pkt::state::MOVING_UP, now, ctx);
+    EXPECT_TRUE(sm::is_idle(state));
+    state = sm::on_command(state, pkt::command::DOWN, 20000, ctx);
+    EXPECT_EQ(sm::operation(state), sm::Operation::CLOSING);
+    state = sm::on_rf_status(state, pkt::state::BOTTOM, 21000, ctx);
+    EXPECT_FALSE(std::get<sm::Idle>(state).estimated_endpoint);
+}
+
+TEST_F(CoverSmTest, ZeroDurationDisablesFallbackAndMillisWrapIsSafe) {
+    no_tracking.endpoint_margin_ms = 1000;
+    auto state = sm::on_tick(sm::Opening{0.5f, 0}, 20000, no_tracking);
+    EXPECT_TRUE(sm::is_moving(state));
+    ctx.endpoint_margin_ms = 2000;
+    const uint32_t start = 0xfffffff0;
+    state = sm::on_tick(sm::Closing{0.5f, start}, start + 12000, ctx);
+    EXPECT_TRUE(sm::is_idle(state));
+    EXPECT_FLOAT_EQ(sm::position(state, 0, ctx), 0.0f);
+}

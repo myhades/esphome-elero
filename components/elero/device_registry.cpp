@@ -376,9 +376,8 @@ void DeviceRegistry::command_cover(Device &dev, uint8_t cmd_byte) {
 
     if (cmd_byte == packet::command::STOP) {
         dev.sender.clear_queue();
-        (void) enqueue_or_warn_(dev, cmd_byte, packet::button::PACKETS,
-                                packet::msg_type::COMMAND,
-                                "command_cover(stop)");
+        if (!enqueue_or_warn_(dev, cmd_byte, packet::button::PACKETS,
+                              packet::msg_type::COMMAND, "command_cover(stop)")) return;
         (void) enqueue_check_(dev, "command_cover(stop)");
         cover.state = cover_sm::on_command(cover.state, cmd_byte, now, ctx);
         cover.target_position = cover_sm::NO_TARGET;
@@ -388,6 +387,7 @@ void DeviceRegistry::command_cover(Device &dev, uint8_t cmd_byte) {
         bool move_queued = enqueue_or_warn_(dev, cmd_byte, packet::button::PACKETS,
                                             packet::msg_type::BUTTON,
                                             "command_cover(move)");
+        if (!move_queued) return;
         (void) enqueue_check_(dev, "command_cover(move)");
         cover.state = cover_sm::on_command(cover.state, cmd_byte, now, ctx);
         if (move_queued) {
@@ -395,6 +395,8 @@ void DeviceRegistry::command_cover(Device &dev, uint8_t cmd_byte) {
         }
     }
 
+    cover.position_confirmed = false;
+    cover.transition_reason = cmd_byte == packet::command::STOP ? "stop_queued" : "travel_queued";
     notify_state_changed_(dev, now);
 }
 
@@ -415,6 +417,7 @@ void DeviceRegistry::set_cover_position(Device &dev, float target) {
         cmd = packet::command::DOWN;
         cover.target_position = cover_sm::NO_TARGET;  // Blind handles endpoint
     } else {
+        if (!cover.position_known) return; // Never target a percentage from an unknown origin.
         float current = cover_sm::position(cover.state, now, ctx);
         cmd = (target > current) ? packet::command::UP : packet::command::DOWN;
         cover.target_position = target;
@@ -422,6 +425,9 @@ void DeviceRegistry::set_cover_position(Device &dev, float target) {
     bool move_queued = enqueue_or_warn_(dev, cmd, packet::button::PACKETS,
                                         packet::msg_type::BUTTON,
                                         "set_cover_position");
+    if (!move_queued) { cover.target_position = cover_sm::NO_TARGET; return; }
+    cover.position_confirmed = false;
+    cover.transition_reason = "position_queued";
     (void) enqueue_check_(dev, "set_cover_position");
     cover.state = cover_sm::on_command(cover.state, cmd, now, ctx);
     if (cmd == packet::command::UP) cover.last_direction = cover_sm::Operation::OPENING;
@@ -445,12 +451,26 @@ void DeviceRegistry::command_cover_tilt(Device &dev) {
                                         packet::msg_type::BUTTON,
                                         "command_cover_tilt");
     (void) enqueue_check_(dev, "command_cover_tilt");
-    cover.state = cover_sm::on_command(cover.state, packet::command::TILT, now, ctx);
+    if (!tilt_queued) return;
+    cover.transition_reason = "preset_queued";
+    if (dev.config.command_profile == 0)
+        cover.state = cover_sm::on_command(cover.state, packet::command::TILT, now, ctx);
     if (tilt_queued) {
         cover.poll.on_command_sent(now);
     }
 
     notify_state_changed_(dev, now);
+}
+
+void DeviceRegistry::command_cover_tilt_step(Device &dev, bool up) {
+    if (!dev.is_cover() || !dev.config.supports_tilt) return;
+    const auto encoding = cover_encoding(dev.config, up ? CoverAction::TILT_UP : CoverAction::TILT_DOWN);
+    if (!dev.sender.enqueue_encoded(encoding, packet::button::PACKETS)) return;
+    (void) enqueue_check_(dev, "tilt_step");
+    auto &cover = std::get<CoverDevice>(dev.logic);
+    cover.transition_reason = up ? "tilt_up_queued" : "tilt_down_queued";
+    cover.poll.on_command_sent(millis());
+    notify_state_changed_(dev, millis());
 }
 
 void DeviceRegistry::command_light(Device &dev, uint8_t cmd_byte) {
@@ -757,6 +777,9 @@ void DeviceRegistry::on_rf_packet(const RfPacketInfo &pkt, uint32_t now) {
                     action == CoverAction::DOWN ? packet::command::DOWN : packet::command::STOP;
                 auto &cover = std::get<CoverDevice>(dev.logic);
                 cover.state = cover_sm::on_command(cover.state, semantic, now, cover_context(dev.config));
+                cover.position_confirmed = false;
+                cover.transition_reason = "observed_remote_command";
+                if (semantic == packet::command::STOP) cover.target_position = cover_sm::NO_TARGET;
                 notify_state_changed_(dev, now);
                 break;
             }
@@ -769,6 +792,12 @@ void DeviceRegistry::dispatch_status_(Device &dev, uint8_t state_byte, uint32_t 
         [&](CoverDevice &cover) {
             auto ctx = cover_context(dev.config);
             cover.state = cover_sm::on_rf_status(cover.state, state_byte, now, ctx);
+            if (state_byte == packet::state::TOP || state_byte == packet::state::BOTTOM ||
+                state_byte == packet::state::TOP_TILT || state_byte == packet::state::BOTTOM_TILT)
+                cover.position_known = true;
+            cover.position_confirmed = state_byte == packet::state::TOP || state_byte == packet::state::BOTTOM ||
+                state_byte == packet::state::TOP_TILT || state_byte == packet::state::BOTTOM_TILT;
+            cover.transition_reason = "rf_status";
             cover.poll.on_rf_received(now);
 
             // Track tilt state from RF
@@ -875,6 +904,14 @@ void DeviceRegistry::loop_cover_(Device &dev, CoverDevice &cover, uint32_t now) 
     auto old_idx = cover.state.index();
     cover.state = cover_sm::on_tick(cover.state, now, ctx);
     bool state_type_changed = (cover.state.index() != old_idx);
+    if (state_type_changed) {
+        cover.position_confirmed = false;
+        const auto *idle = std::get_if<cover_sm::Idle>(&cover.state);
+        if (idle && idle->estimated_endpoint) {
+            cover.position_known = true;
+            cover.transition_reason = "calibrated_timeout";
+        } else cover.transition_reason = was_stopping ? "stop_cooldown" : "movement_timeout";
+    }
 
     // 2. Poll if due — single packet suffices (blind is mains-powered, always
     //    listening). If missed, retry via normal poll interval.

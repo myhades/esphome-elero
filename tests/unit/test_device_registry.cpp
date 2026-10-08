@@ -371,7 +371,8 @@ TEST_F(DeviceRegistryTest, LightCommand_CheckDelegatesToRequestCheck) {
 
 TEST_F(DeviceRegistryTest, SetPosition_IntermediateTarget) {
     auto *dev = add_cover();
-    // Use 0.75 (not 0.5) — boot position is Idle{0.5}, so set_position(0.5) would be a no-op
+    registry_.on_rf_packet(make_status_pkt(dev->config.dst_address, pkt::state::BOTTOM), mock_time_.millis());
+    // A confirmed bottom gives percentage travel a valid origin.
     registry_.set_cover_position(*dev, 0.75f);
 
     auto &cover = std::get<CoverDevice>(dev->logic);
@@ -591,6 +592,7 @@ TEST_F(DeviceRegistryTest, RfCommand_ChangedRemoteField_Publishes) {
 
 TEST_F(DeviceRegistryTest, Loop_CoverAutoStopsAtTargetPosition) {
     auto *dev = add_cover();
+    registry_.on_rf_packet(make_status_pkt(dev->config.dst_address, pkt::state::BOTTOM), mock_time_.millis());
     registry_.set_cover_position(*dev, 0.5f);
 
     auto &cover = std::get<CoverDevice>(dev->logic);
@@ -658,6 +660,7 @@ TEST(DiffCoverTest, FirstDiff_DefaultPublished_ReturnsAllFlags) {
     CoverDevice::Published pub{};  // defaults: position_pct=-1, ha_state=nullptr, etc.
     CoverStateSnapshot snap{
         .position = 0.0f,
+        .position_known = true,
         .ha_state = "closed",
         .operation = cover_sm::Operation::IDLE,
         .tilted = false,
@@ -682,6 +685,7 @@ TEST(DiffCoverTest, IdenticalSnapshot_ReturnsZero) {
     CoverDevice::Published pub{};
     CoverStateSnapshot snap{
         .position = 0.5f,
+        .position_known = true,
         .ha_state = "open",
         .operation = cover_sm::Operation::IDLE,
         .tilted = false,
@@ -704,6 +708,7 @@ TEST(DiffCoverTest, SingleFieldChange_ReturnsOnlyThatFlag) {
     CoverDevice::Published pub{};
     CoverStateSnapshot snap{
         .position = 0.5f,
+        .position_known = true,
         .ha_state = "open",
         .operation = cover_sm::Operation::IDLE,
         .tilted = false,
@@ -730,6 +735,7 @@ TEST(DiffCoverTest, RssiRounding_SameRounded_NoFlag) {
     CoverDevice::Published pub{};
     CoverStateSnapshot snap{
         .position = 0.0f,
+        .position_known = true,
         .ha_state = "closed",
         .operation = cover_sm::Operation::IDLE,
         .tilted = false,
@@ -1260,3 +1266,49 @@ TEST_F(DeviceRegistryTest, RemoteAliasCommandsUpdateOnlyExplicitlyLinkedMotor) {
     EXPECT_EQ(cover_sm::operation(std::get<CoverDevice>(dev->logic).state), cover_sm::Operation::IDLE);
     EXPECT_EQ(dev->config.channel, cfg.channel);
 }
+
+TEST_F(DeviceRegistryTest, UnknownBootDoesNotInventPercentageOrAllowIntermediateTarget) {
+    auto *dev = add_cover();
+    auto snap = compute_cover_snapshot(*dev, mock_time_.millis());
+    EXPECT_FALSE(snap.position_known);
+    EXPECT_STREQ(snap.position_source, "unknown");
+    EXPECT_STREQ(snap.ha_state, "unknown");
+    registry_.set_cover_position(*dev, 0.6f);
+    EXPECT_EQ(dev->sender.queue_size(), 0u);
+}
+
+TEST_F(DeviceRegistryTest, FallbackPreservesRawStatusAndReportsEstimatedClosed) {
+    auto cfg = make_cover_config(0x300001);
+    cfg.endpoint_margin_ms = 2000;
+    cfg.command_profile = 1;
+    auto *dev = registry_.upsert(cfg);
+    registry_.command_cover(*dev, pkt::command::DOWN);
+    registry_.on_rf_packet(make_status_pkt(cfg.dst_address, pkt::state::MOVING_DOWN), mock_time_.millis());
+    mock_time_.advance(cfg.close_duration_ms + 2000);
+    registry_.loop(mock_time_.millis());
+    auto snap = compute_cover_snapshot(*dev, mock_time_.millis());
+    EXPECT_STREQ(snap.ha_state, "closed");
+    EXPECT_STREQ(snap.position_source, "time_estimated");
+    EXPECT_STREQ(snap.transition_reason, "calibrated_timeout");
+    EXPECT_EQ(dev->rf.last_state_raw, pkt::state::MOVING_DOWN);
+    registry_.on_rf_packet(make_status_pkt(cfg.dst_address, pkt::state::MOVING_DOWN), mock_time_.millis());
+    EXPECT_EQ(compute_cover_snapshot(*dev, mock_time_.millis()).operation, cover_sm::Operation::IDLE);
+    registry_.on_rf_packet(make_status_pkt(cfg.dst_address, pkt::state::BOTTOM), mock_time_.millis());
+    EXPECT_STREQ(compute_cover_snapshot(*dev, mock_time_.millis()).position_source, "motor_confirmed");
+}
+
+TEST_F(DeviceRegistryTest, TiltDirectionsLeaveHeightAloneAndStopPreemptsQueue) {
+    auto cfg = make_cover_config(0x300001);
+    cfg.command_profile = 1;
+    cfg.supports_tilt = 1;
+    auto *dev = registry_.upsert(cfg);
+    registry_.command_cover_tilt_step(*dev, true);
+    registry_.command_cover_tilt_step(*dev, false);
+    EXPECT_EQ(compute_cover_snapshot(*dev, mock_time_.millis()).operation, cover_sm::Operation::IDLE);
+    EXPECT_FALSE(compute_cover_snapshot(*dev, mock_time_.millis()).position_known);
+    registry_.command_cover(*dev, pkt::command::STOP);
+    EXPECT_EQ(dev->sender.queue_size(), 2u); // only STOP + CHECK survive
+}
+
+// Reuse this translation unit's ESPHome stubs for the snapshot projection cases.
+#include "test_state_snapshot.cpp"
