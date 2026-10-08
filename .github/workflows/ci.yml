@@ -94,7 +94,8 @@ jobs:
           mkdir -p review-artifacts
           find tests/.esphome/build -type f \( -name 'firmware.factory.bin' -o -name 'firmware.ota.bin' -o -name 'firmware.elf' \) -exec cp {} review-artifacts/ \;
           cp "tests/${TEST_CONFIG}.yaml" review-artifacts/
-          cp .mise.toml uv.lock components/elero_web/frontend/app/pnpm-lock.yaml review-artifacts/
+          cp .mise.toml review-artifacts/tool-versions.toml
+          cp uv.lock components/elero_web/frontend/app/pnpm-lock.yaml review-artifacts/
           git rev-parse HEAD > review-artifacts/source-commit.txt
           printf 'CI workflow: %s/actions/runs/%s\nTest build only; not paired or validated on physical hardware.\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > review-artifacts/BUILD-NOTES.txt
           (cd review-artifacts && sha256sum * > SHA256SUMS)
