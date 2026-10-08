@@ -1380,3 +1380,59 @@ TEST_F(DeviceRegistryTest, ExplicitMergePersistsCanonicalAndRejectsUnrelatedRemo
     ASSERT_NE(rebooted.find(canonical.dst_address), nullptr);
     EXPECT_EQ(rebooted.find(canonical.dst_address)->config.command_address, duplicate.dst_address);
 }
+
+TEST_F(DeviceRegistryTest, YamlAuthorityPreservesLegacyRecordsAndRollbackMigration) {
+    auto legacy = static_cast<NvsDeviceConfigV3>(make_cover_config(0x300001));
+    legacy.version = 3;
+    auto old_pref = esphome::global_preferences->make_preference<NvsDeviceConfigV3>(esphome::fnv1_hash("elero_device"));
+    ASSERT_TRUE(old_pref.save(&legacy));
+    auto v4 = make_cover_config(0x300002);
+    auto new_pref = esphome::global_preferences->make_preference<NvsDeviceConfig>(esphome::fnv1_hash("elero_device_v4") + 1);
+    ASSERT_TRUE(new_pref.save(&v4));
+
+    registry_.set_yaml_mode(true);
+    registry_.set_nvs_enabled(true);  // Cannot accidentally re-enable writes.
+    EXPECT_FALSE(registry_.is_nvs_enabled());
+    registry_.restore_all();
+    EXPECT_EQ(registry_.count_active(), 0u);
+    auto yaml = make_cover_config(legacy.dst_address);
+    yaml.command_address = 0x200001;
+    yaml.open_duration_ms = 27000;
+    auto *dev = registry_.upsert(yaml);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(dev->config.command_destination(), 0x200001u);
+    EXPECT_TRUE(registry_.persist(*dev));
+    ASSERT_TRUE(registry_.remove(yaml.dst_address, DeviceType::COVER));
+    NvsDeviceConfigV3 retained_v3{};
+    NvsDeviceConfig retained_v4{};
+    ASSERT_TRUE(old_pref.load(&retained_v3));
+    ASSERT_TRUE(new_pref.load(&retained_v4));
+    EXPECT_EQ(std::memcmp(&legacy, &retained_v3, sizeof(legacy)), 0);
+    EXPECT_EQ(std::memcmp(&v4, &retained_v4, sizeof(v4)), 0);
+
+    DeviceRegistry rollback;
+    rollback.set_nvs_enabled(true);
+    rollback.restore_all();
+    ASSERT_NE(rollback.find(legacy.dst_address), nullptr);
+    EXPECT_EQ(rollback.find(legacy.dst_address)->config.open_duration_ms, legacy.open_duration_ms);
+    EXPECT_EQ(rollback.find(legacy.dst_address)->config.version, 4);
+    EXPECT_NE(rollback.find(v4.dst_address), nullptr);
+}
+
+TEST_F(DeviceRegistryTest, YamlModeObservesConfiguredRemoteWithoutDiscoveringEntities) {
+    registry_.set_yaml_mode(true);
+    auto cfg = make_cover_config(0x300001);
+    cfg.command_profile = 1;
+    cfg.command_address = 0x200001;
+    auto *dev = registry_.upsert(cfg);
+    ASSERT_NE(dev, nullptr);
+    RfPacketInfo pkt{};
+    pkt.type = 0x69; pkt.src = cfg.src_address; pkt.dst = cfg.command_address;
+    pkt.channel = cfg.channel; pkt.command = 0x21;
+    registry_.on_rf_packet(pkt, 1000);
+    EXPECT_EQ(registry_.count_active(), 1u);
+    EXPECT_TRUE(std::holds_alternative<cover_sm::Opening>(std::get<CoverDevice>(dev->logic).state));
+    pkt.src = 0x999999;
+    registry_.on_rf_packet(pkt, 2000);
+    EXPECT_EQ(registry_.count_active(), 1u);
+}

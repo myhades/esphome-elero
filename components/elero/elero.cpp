@@ -41,6 +41,9 @@ void Elero::loop() {
     } else {
       this->stat_tx_fail_++;
     }
+    ESP_LOGV(TAG_RF, "TX_RESULT t=%lu success=%u raw=%s",
+             static_cast<unsigned long>(result.packet.timestamp_ms), result.success,
+             format_hex_pretty(result.packet.raw, result.packet.raw_len).c_str());
     if (this->registry_ != nullptr)
       this->registry_->on_rf_packet(result.packet, result.packet.timestamp_ms);
     if (result.client != nullptr) {
@@ -492,7 +495,7 @@ optional<RfPacketInfo> Elero::decode_packet(const uint8_t *buf, size_t buf_len) 
 #endif
   memcpy(pkt.payload, r.payload, sizeof(pkt.payload));
 
-  // Copy raw bytes for WebSocket broadcast
+  // Preserve raw bytes for RF diagnostics
   size_t raw_total = static_cast<size_t>(r.length) + PACKET_TOTAL_OVERHEAD;
   pkt.raw_len = (raw_total <= CC1101_FIFO_LENGTH) ? static_cast<uint8_t>(raw_total) : CC1101_FIFO_LENGTH;
   memcpy(pkt.raw, buf, pkt.raw_len);
@@ -509,6 +512,10 @@ void Elero::dispatch_packet(const RfPacketInfo &pkt) {
 
   ESP_LOGV(TAG_RF, "RX src=0x%06x dst=0x%06x type=0x%02x cmd=0x%02x state=0x%02x cnt=%u",
            pkt.src, pkt.dst, pkt.type, pkt.command, pkt.state, pkt.cnt);
+
+  ESP_LOGV(TAG_RF, "RX_META t=%lu ch=%u type2=0x%02x hop=0x%02x rssi=%.1f crc=%u raw=%s",
+           static_cast<unsigned long>(pkt.timestamp_ms), pkt.channel, pkt.type2, pkt.hop,
+           pkt.rssi, pkt.crc_ok, format_hex_pretty(pkt.raw, pkt.raw_len).c_str());
 
   // Dispatch through unified device registry (state machines, adapters, observers)
   if (this->registry_ != nullptr) {

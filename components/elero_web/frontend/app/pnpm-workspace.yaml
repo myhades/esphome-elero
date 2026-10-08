@@ -1,3 +1,0 @@
-onlyBuiltDependencies:
-  - "@asyncapi/cli"
-  - esbuild

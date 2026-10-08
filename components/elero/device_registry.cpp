@@ -137,6 +137,7 @@ void DeviceRegistry::update_hub_display_name_() {
 }
 
 void DeviceRegistry::restore_all() {
+    if (yaml_mode_) return;
     if (!prefs_initialized_) {
         init_preferences();
     }
@@ -801,7 +802,7 @@ void DeviceRegistry::on_rf_packet(const RfPacketInfo &pkt, uint32_t now) {
     } else if (packet::is_command_packet(pkt.type)) {
         // Remote commands are passive — we only auto-discover the remote.
         // The blind's status response (via dispatch_status_) handles state.
-        track_remote_(pkt, now);
+        if (!yaml_mode_) track_remote_(pkt, now);
         for (auto &dev : slots_) {
             if (!dev.active || !dev.is_cover() || dev.config.command_destination() != pkt.dst ||
                 dev.config.src_address != pkt.src || dev.config.channel != pkt.channel) continue;

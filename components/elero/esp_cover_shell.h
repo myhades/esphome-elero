@@ -2,8 +2,7 @@
 /// @brief Thin ESPHome cover::Cover adapter — delegates all state to the Device model.
 ///
 /// Owns NO cover state. Reads position/operation from the cover state machine.
-/// Constructed by `NvsAdapter` at boot from a pre-restored DeviceRegistry slot.
-/// Devices are no longer YAML-defined (RFC-002) — they live in NVS.
+/// Bound to the YAML-authoritative registry slot before API enumeration.
 
 #pragma once
 
@@ -73,6 +72,7 @@ class EspCoverShell : public cover::Cover, public Component {
   // ── ESPHome Cover interface ────────────────────────────────
   cover::CoverTraits get_traits() override {
     auto traits = cover::CoverTraits();
+    if (device_ == nullptr) return traits;
     const auto &cfg = device_->config;
     auto ctx = cover_context(cfg);
     traits.set_supports_position(cover_sm::has_position_tracking(ctx));

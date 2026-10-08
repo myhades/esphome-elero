@@ -1,163 +1,47 @@
-name: CI
-
-on:
-  push:
-    branches: [dev, main]
-  pull_request:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
+name: Raffstore
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
 jobs:
-  # Build frontend header (needed by ESPHome compile tests)
-  build-frontend:
-    name: Build Frontend
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: jdx/mise-action@v3
+      - uses: actions/setup-python@v5
         with:
-          install_args: node pnpm
-
-      - name: Install dependencies
-        working-directory: components/elero_web/frontend/app
-        run: mise exec node pnpm -- pnpm install --frozen-lockfile
-
-      - name: Frontend tests and checks
-        working-directory: components/elero_web/frontend/app
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.5'
+      - run: uv sync --locked
+      - run: uv run pytest
+      - run: uv run ruff check components/elero
+      - run: cmake -S tests/unit -B build/native && cmake --build build/native -j 2 && ctest --test-dir build/native --output-on-failure
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.5'
+      - run: uv sync --locked
+      - name: Reject accidental JavaScript build dependencies
         run: |
-          pnpm test
-          pnpm lint
-          pnpm typecheck
-          pnpm exec playwright install --with-deps chromium
-          pnpm test:browser
-
-      - name: Build frontend
-        working-directory: components/elero_web/frontend/app
-        run: mise exec node pnpm -- pnpm build
-
-      - name: Verify reproducible UI header
-        working-directory: components/elero_web/frontend/app
-        run: |
-          sha256sum ../../elero_web_ui.h > /tmp/elero-ui.sha256
-          pnpm build
-          sha256sum --check /tmp/elero-ui.sha256
-
+          mkdir -p /tmp/no-js
+          for executable in node npm npx pnpm yarn; do
+            printf '#!/bin/sh\necho "Forbidden JS build tool" >&2\nexit 99\n' > /tmp/no-js/$executable
+            chmod +x /tmp/no-js/$executable
+          done
+          echo /tmp/no-js >> "$GITHUB_PATH"
+      - run: uv run esphome compile tests/test.esp32-s3-n16r8.yaml
       - uses: actions/upload-artifact@v4
         with:
-          name: elero_web_ui
+          name: raffstore-n16r8-esphome-2026.9.1
           path: |
-            components/elero_web/elero_web_ui.h
-            components/elero_web/elero_web_ui.manifest.json
-          retention-days: 1
-
-  # ESPHome compile tests for each platform
-  esphome-compile:
-    name: ESPHome Compile (${{ matrix.test }})
-    runs-on: ubuntu-latest
-    needs: build-frontend
-    strategy:
-      fail-fast: false
-      matrix:
-        test:
-          - test.esp32-s3-ard
-          - test.esp32-s3-idf
-          - test.esp32-ard
-          - test.esp32-minimal
-          - test.esp32-mqtt
-          - test.esp32-nvs
-          - test.esp32-s3-n16r8
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: jdx/mise-action@v3
-        with:
-          install_args: python uv
-
-      - name: Install Python dependencies
-        run: mise exec python uv -- uv sync --locked
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: elero_web_ui
-          path: components/elero_web/
-
-      - name: Compile ${{ matrix.test }}
-        run: mise exec python uv -- uv run esphome compile tests/${{ matrix.test }}.yaml
-
-      - name: Package review artifacts with provenance
-        env:
-          TEST_CONFIG: ${{ matrix.test }}
-        run: |
-          mkdir -p review-artifacts
-          find tests/.esphome/build -type f \( -name 'firmware.factory.bin' -o -name 'firmware.ota.bin' -o -name 'firmware.elf' \) -exec cp {} review-artifacts/ \;
-          cp "tests/${TEST_CONFIG}.yaml" review-artifacts/
-          cp .mise.toml review-artifacts/tool-versions.toml
-          cp uv.lock components/elero_web/frontend/app/pnpm-lock.yaml review-artifacts/
-          git rev-parse HEAD > review-artifacts/source-commit.txt
-          printf 'CI workflow: %s/actions/runs/%s\nTest build only; not paired or validated on physical hardware.\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > review-artifacts/BUILD-NOTES.txt
-          (cd review-artifacts && sha256sum * > SHA256SUMS)
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: firmware-${{ matrix.test }}
-          path: review-artifacts/
-          retention-days: 30
-
-  # Unit tests for protocol layer
-  unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: jdx/mise-action@v3
-        with:
-          install_args: aqua:Kitware/CMake
-
-      - name: Configure CMake
-        run: mise exec aqua:Kitware/CMake -- cmake -B build -S tests/unit
-
-      - name: Build
-        run: mise exec aqua:Kitware/CMake -- cmake --build build
-
-      - name: Run tests with JUnit XML output
-        run: mise exec aqua:Kitware/CMake -- cmake --build build --target test_xml
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-results
-          path: build/test-results.xml
-          retention-days: 30
-
-      - name: Publish test results
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: Unit Test Results
-          path: build/test-results.xml
-          reporter: java-junit
-
-  # Python code validation (formatting removed - not enforced)
-  python-lint:
-    name: Python Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: jdx/mise-action@v3
-        with:
-          install_args: python uv
-
-      - name: Install Python dependencies
-        run: mise exec python uv -- uv sync --locked
-
-      - name: Lint Python files
-        run: mise exec python uv -- uv run ruff check components/
-
-      - name: Run Python tests
-        run: mise exec python uv -- uv run pytest
+            tests/.esphome/build/test-esp32-s3-n16r8/.pioenvs/test-esp32-s3-n16r8/firmware*.bin
+            tests/.esphome/build/test-esp32-s3-n16r8/build/firmware*.bin
+            uv.lock
+            tests/test.esp32-s3-n16r8.yaml

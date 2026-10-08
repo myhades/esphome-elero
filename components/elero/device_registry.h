@@ -33,7 +33,9 @@ class DeviceRegistry {
     // ═════════════════════════════════════════════════════════════════════════
 
     /// Enable NVS persistence (MQTT/NVS modes). Must be called before setup.
-    void set_nvs_enabled(bool en) { nvs_enabled_ = en; }
+    void set_nvs_enabled(bool en) { nvs_enabled_ = en && !yaml_mode_; }
+    // Static configuration never activates or overwrites legacy NVS records.
+    void set_yaml_mode(bool enabled) { yaml_mode_ = enabled; if (enabled) nvs_enabled_ = false; }
     [[nodiscard]] bool is_nvs_enabled() const { return nvs_enabled_; }
 
     /// Set/get hub operating mode (for web UI mode reporting).
@@ -222,6 +224,7 @@ class DeviceRegistry {
     std::vector<OutputAdapter *> adapters_;
     Elero *hub_{nullptr};
     bool nvs_enabled_{false};
+    bool yaml_mode_{false};
     HubMode mode_{HubMode::NATIVE};
 
     // NVS preference handles (one per slot)
