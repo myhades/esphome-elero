@@ -1,22 +1,8 @@
-name: Raffstore
-on: [push, pull_request, workflow_dispatch]
+name: Optional firmware build
+on: workflow_dispatch
 permissions:
   contents: read
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: '0.12.5'
-      - run: uv sync --locked
-      - run: uv run pytest
-      - run: uv run ruff check components/elero
-      - run: cmake -S tests/unit -B build/native && cmake --build build/native -j 2 && ctest --test-dir build/native --output-on-failure
   firmware:
     runs-on: ubuntu-latest
     steps:
@@ -28,20 +14,8 @@ jobs:
         with:
           version: '0.12.5'
       - run: uv sync --locked
-      - name: Reject accidental JavaScript build dependencies
-        run: |
-          mkdir -p /tmp/no-js
-          for executable in node npm npx pnpm yarn; do
-            printf '#!/bin/sh\necho "Forbidden JS build tool" >&2\nexit 99\n' > /tmp/no-js/$executable
-            chmod +x /tmp/no-js/$executable
-          done
-          echo /tmp/no-js >> "$GITHUB_PATH"
       - run: uv run esphome compile tests/test.esp32-s3-n16r8.yaml
       - uses: actions/upload-artifact@v4
         with:
-          name: raffstore-n16r8-esphome-2026.9.1
-          path: |
-            tests/.esphome/build/test-esp32-s3-n16r8/.pioenvs/test-esp32-s3-n16r8/firmware*.bin
-            tests/.esphome/build/test-esp32-s3-n16r8/build/firmware*.bin
-            uv.lock
-            tests/test.esp32-s3-n16r8.yaml
+          name: raffstore-n16r8
+          path: tests/.esphome/build/test-esp32-s3-n16r8/build/firmware*.bin

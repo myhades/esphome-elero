@@ -1,45 +1,45 @@
-# ESPHome Elero Raffstore
+# Personal Elero Raffstore component
 
-Personal ESP32-S3 N16R8 + CC1101 external component. Requires ESPHome 2026.9.1.
-Native ESPHome covers and diagnostic entities; no web server, JavaScript tooling,
-Mongoose, MQTT adapter, dynamic discovery or runtime device editor.
+ESPHome **2026.9.1**, ESP32-S3 N16R8, CC1101. Native HA cover, diagnostics and
+API RF debugging. Start from `configs/raffstore.yaml`; keep your own device name,
+Wi-Fi/API/OTA credentials and RF addresses. The example contains synthetic addresses.
 
-Start with `configs/raffstore.yaml`, set the three RF addresses and provide
-`wifi_ssid`, `wifi_password`, `api_encryption_key`, `ota_password` in `secrets.yaml`.
-Compile with `esphome compile configs/raffstore.yaml`. Upload only when ready.
-All seven RF actions accept command, type, type2, hop, payload_1, payload_2 and
-`destination: command|status`. Frame type is required; 0x44 defaults to type2=0x10/hop=0, while
-0x69/0x6A default to type2=0/hop=0x0A. Payload defaults are 0, 4. CHECK uses the status address in the example. Motor compatibility has not
-been physically verified.
+## Fast iteration
 
-YAML is authoritative. Legacy V3/V4 NVS keys are neither loaded nor written by
-this firmware. Existing migration routines and tests remain for rollback to
-`cc57e88`; preserve the NVS partition and do not erase flash. Changing/removing a
-YAML entity takes effect after compilation and OTA, without reviving old devices.
+- Change RF command/type/type2/hop/destination in HA's native API debug action:
+  **no compile and no OTA**. This affects only that call, not normal cover controls.
+- Change firmware or permanent YAML: build once from the same YAML path.
+- Upload the already-built firmware separately if needed; upload does not compile.
+- No automatic test/build pipeline on push. GitHub firmware builds are manual.
 
-Travel durations of 0s disable position control. After measuring both full travel
-times, set `state_strategy: timed` with `endpoint_margin` to settle missing terminal
-feedback as an estimate. `feedback` only trusts reported endpoints. RF Status and
-Position Source exposes provenance; tilt is a directional step, not a measured
-angle. `tilt: true` automatically creates two native Tilt Up/Down Step buttons.
-There is no native tilt slider because the motor does not report a measured angle.
-The native cover API requires finite position floats: before height is known it
-uses a 50% transport placeholder, explicitly labeled in the status diagnostic and
-startup log. This is neither measured nor estimated height. The registry stays
-unknown and rejects intermediate targets until referenced; real feedback replaces
-the placeholder. No NaN is sent in native cover position/tilt fields.
+```sh
+uv sync --locked
+uv run python scripts/dev.py check path/to/device.yaml
+uv run python scripts/dev.py build path/to/device.yaml
+uv run python scripts/dev.py upload path/to/device.yaml --device DEVICE_IP
+uv run python scripts/dev.py logs path/to/device.yaml --device DEVICE_IP
+# Or build + upload in one explicit command:
+uv run python scripts/dev.py deploy path/to/device.yaml --device DEVICE_IP
+```
 
-Development: `uv sync --locked`, `uv run pytest`, and
-`cmake -S tests/unit -B build/native && cmake --build build/native && ctest --test-dir build/native`.
-The sole compile fixture is `tests/test.esp32-s3-n16r8.yaml`; CI deliberately blocks
-Node/npm/pnpm/yarn executables during firmware compilation.
+`check` only generates C++; `build` never uploads. Keep caches and the same config
+path. ESPHome may still rebuild when framework/core options or component sets
+change; this wrapper does not bypass required rebuilds. Two optional smoke checks:
+`uv run pytest -q`. No CMake/GoogleTest/WSL or per-commit firmware builds.
 
-The example `api.actions` exposes `elero_rf_debug` in Home Assistant for manual
-parameter probes without recompilation. It uses the configured remote/channel
-and the existing sender counter, validates integer ranges, and accepts 1–3 packets
-per burst (normal bounded transport retries still apply). It does not modify
-YAML/NVS or infer movement from a debug transmission. Type 0x44 uses channel-based
-addressing on the wire: `destination` only affects addressed 0x69/0x6A frames.
-DEBUG logs show TX_REQUEST/TX_RESULT and RX; success means radio completion, not
-motor acknowledgment. A busy sender rejects further probes except STOP (0x10),
-which cancels pending logical work; already-posted RF work cannot be retracted.
+## Behavior
+
+YAML is authoritative; old V3/V4 device NVS records stay untouched for rollback.
+0x44 uses channel addressing and defaults to type2=0x10/hop=0; 0x69/0x6A use the
+explicit destination and default to type2=0/hop=0x0A. Physical acceptance remains
+unverified. TX success means radio completion, not motor acknowledgment.
+
+Both travel durations at 0s disable position control. `state_strategy: timed`
+uses measured travel durations plus margin; `feedback` waits for RF endpoints.
+`tilt: true` creates two native step buttons, not an angle slider. At unknown boot
+height the native cover displays a labeled 50% API placeholder; the registry and
+status diagnostic remain unknown until referenced. This is not measured height.
+
+Debug bursts use the existing sender/counter, accept 1–3 packets with bounded
+transport retries, reject invalid arguments, and preserve YAML/NVS. STOP can
+cancel pending logical work; already-posted RF work cannot be retracted.

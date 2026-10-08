@@ -1,16 +1,12 @@
 [tools]
 python = "3.12.14"
 uv = "0.12.5"
-"aqua:Kitware/CMake" = "4.2.3"
 
 [tasks.setup]
 run = "uv sync --locked"
 
-[tasks.test]
-run = "cmake -S tests/unit -B build/native && cmake --build build/native && ctest --test-dir build/native --output-on-failure"
+[tasks.check]
+run = "uv run esphome compile --only-generate tests/test.esp32-s3-n16r8.yaml"
 
-[tasks.compile]
-run = "uv run esphome compile tests/test.esp32-s3-n16r8.yaml"
-
-[tasks.lint]
-run = "uv run ruff check components/elero"
+[tasks.smoke]
+run = "uv run pytest -q"

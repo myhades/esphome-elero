@@ -19,7 +19,6 @@
 #ifdef USE_BINARY_SENSOR
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #endif
-#include "native_cover_projection.h"
 #include "device.h"
 #include "device_registry.h"
 #include "cover_sm.h"
@@ -78,7 +77,7 @@ class EspCoverShell : public cover::Cover, public Component {
     const auto &cfg = device_->config;
     auto ctx = cover_context(cfg);
     traits.set_supports_position(cover_sm::has_position_tracking(ctx));
-    traits.set_supports_tilt(native_cover_has_tilt(cfg.supports_tilt != 0, cfg.command_profile));
+    traits.set_supports_tilt(cfg.supports_tilt != 0 && cfg.command_profile != 1);
     traits.set_supports_stop(true);
     traits.set_supports_toggle(true);
     traits.set_is_assumed_state(true);
@@ -138,10 +137,10 @@ class EspCoverShell : public cover::Cover, public Component {
 
     if (changes & (state_change::POSITION | state_change::HA_STATE |
                    state_change::OPERATION | state_change::TILT)) {
-      this->position = native_cover_position(pub.position_known, pub.position_pct);
+      this->position = pub.position_known ? pub.position_pct / 100.0f : 0.5f;
       // Unadvertised for Raffstore, but keep the wire field finite as well.
       this->tilt = 0.0f;
-      if (native_cover_has_tilt(device_->config.supports_tilt != 0, device_->config.command_profile)) {
+      if (device_->config.supports_tilt != 0 && device_->config.command_profile != 1) {
         this->tilt = pub.tilted ? cover_sm::POSITION_OPEN : cover_sm::POSITION_CLOSED;
       }
       switch (pub.operation) {

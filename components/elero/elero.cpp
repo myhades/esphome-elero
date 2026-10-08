@@ -64,10 +64,7 @@ void Elero::loop() {
     this->registry_->loop(now);
   }
 
-  // 4. Learn-in / provisioning loop (transport-agnostic RF primitives)
-  this->learn_in_.loop(now, this);
-
-  // 5. Publish RF stats sensors (throttled to every 30s)
+  // 4. Publish RF stats sensors (throttled to every 30s)
   this->publish_stats_();
 #endif
 }

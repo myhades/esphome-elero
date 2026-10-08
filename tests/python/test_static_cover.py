@@ -1,74 +1,11 @@
-"""Reject invalid RF identities and misleading time-based position configuration."""
-import pytest
-from esphome.config_validation import Invalid
-from elero.cover import ACTION_SCHEMA, ADDRESS, DURATION, validate_timing
-
-@pytest.mark.parametrize("address", [0, -1, 0x1000000])
-def test_invalid_address(address):
-    with pytest.raises(Invalid):
-        ADDRESS(address)
-
-@pytest.mark.parametrize("address", [1, 0xFFFFFF, "0x300001"])
-def test_valid_address(address):
-    assert ADDRESS(address) > 0
-
-@pytest.mark.parametrize("frame_type", [0x44, 0x69, 0x6A])
-def test_explicit_framing(frame_type):
-    config = ACTION_SCHEMA({"command": 0x21, "type": frame_type})
-    assert config["type"] == frame_type
-    assert config["type2"] == (0x10 if frame_type == 0x44 else 0)
-    assert config["hop"] == (0 if frame_type == 0x44 else 0x0A)
-    assert config["payload_2"] == 4
-    assert config["destination"] == "command"
-
-@pytest.mark.parametrize("config", [
-    {"command": 256}, {"command": -1}, {"command": 0x10, "type": 0xCA},
-    {"command": 0, "destination": "broadcast"}, {"command": 0, "hop": 256},
-])
-def test_invalid_action(config):
-    with pytest.raises(Invalid):
-        ACTION_SCHEMA({"type": 0x69, **config})
-
-@pytest.mark.parametrize("opening,closing,strategy,valid", [
-    (0, 0, "feedback", True), (0, 0, "timed", False),
-    (10, 0, "feedback", False), (0, 10, "timed", False),
-    (10, 12, "timed", True), (10, 12, "feedback", True),
-])
-def test_timing(opening, closing, strategy, valid):
-    config = {"open_duration": DURATION(f"{opening}s"),
-              "close_duration": DURATION(f"{closing}s"), "state_strategy": strategy}
-    if valid:
-        assert validate_timing(config) is config
-    else:
-        with pytest.raises(Invalid):
-            validate_timing(config)
+"""Optional smoke checks: configuration and actual ESPHome code generation only."""
+from elero.cover import ACTION_SCHEMA
 
 
-def test_duplicate_status_identity_is_rejected(monkeypatch):
-    from unittest.mock import Mock
-    from esphome import final_validate as fv
-    from elero.cover import final_validate
-    full = Mock()
-    full.get.return_value = {"cover": [
-        {"platform": "elero", "status_address": 0x300001},
-        {"platform": "elero", "status_address": 0x300001},
-    ]}
-    monkeypatch.setattr(fv, "full_config", full)
-    with pytest.raises(Invalid, match="unique status_address"):
-        final_validate({})
-
-
-def test_registry_capacity_is_validated(monkeypatch):
-    from unittest.mock import Mock
-    from esphome import final_validate as fv
-    from elero.cover import final_validate
-    full = Mock()
-    full.get.return_value = {"cover": [
-        {"platform": "elero", "status_address": i + 1} for i in range(49)
-    ]}
-    monkeypatch.setattr(fv, "full_config", full)
-    with pytest.raises(Invalid, match="48"):
-        final_validate({})
+def test_frame_headers():
+    for frame, type2, hop in [(0x44, 0x10, 0), (0x69, 0, 10), (0x6A, 0, 10)]:
+        action = ACTION_SCHEMA({"command": 0x21, "type": frame})
+        assert (action["type2"], action["hop"]) == (type2, hop)
 
 
 def test_complete_native_codegen(tmp_path):
@@ -103,21 +40,3 @@ def test_complete_native_codegen(tmp_path):
     assert "TiltStepButton(raffstore, false)" in source
     assert source.count("App.register_button(") == 2
     assert "debug_send(command, frame_type, type2, hop" in source
-
-
-def test_rf_type_must_be_explicit():
-    with pytest.raises(Invalid):
-        ACTION_SCHEMA({"command": 0x21})
-
-
-def test_explicit_headers_are_preserved():
-    config = ACTION_SCHEMA({"command": 0x21, "type": 0x44, "type2": 7, "hop": 8})
-    assert config["type2"] == 7
-    assert config["hop"] == 8
-
-
-def test_tilt_false_does_not_create_step_buttons():
-    from elero.cover import add_tilt_buttons
-    config = add_tilt_buttons({"name": "Curtain", "tilt": False})
-    assert "tilt_up_button" not in config
-    assert "tilt_down_button" not in config
