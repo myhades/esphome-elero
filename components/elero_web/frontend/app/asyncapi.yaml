@@ -6,9 +6,9 @@ info:
   description: |
     Real-time WebSocket interface for the esphome-elero gateway.
 
-    The server is a **stateless pipe** — it forwards RF packets and logs to clients,
-    and routes commands from clients to the Elero hub. All state derivation
-    (discovery, blind positions, device states) happens client-side.
+    The server owns persisted device identity, command profiles and state projection.
+    Clients render state snapshots and maintain provisional discovery and bounded
+    diagnostics. TX completion is radio completion, never motor acknowledgement.
 
     ## Connection
 
@@ -53,6 +53,12 @@ channels:
   eleroWs:
     address: /elero/ws
     messages:
+      diagnosticsMessage:
+        $ref: "#/components/messages/diagnosticsMessage"
+      diagnosticsEvent:
+        $ref: "#/components/messages/diagnosticsEvent"
+      mergeAliasMessage:
+        $ref: "#/components/messages/mergeAliasMessage"
       configEvent:
         $ref: "#/components/messages/configEvent"
       rfEvent:
@@ -109,6 +115,27 @@ channels:
         $ref: "#/components/messages/learnInCancelMessage"
 
 operations:
+  sendDiagnosticsPayload:
+    action: send
+    channel:
+      $ref: "#/channels/eleroWs"
+    messages:
+      - $ref: "#/channels/eleroWs/messages/diagnosticsMessage"
+
+  receiveDiagnosticsEnvelope:
+    action: receive
+    channel:
+      $ref: "#/channels/eleroWs"
+    messages:
+      - $ref: "#/channels/eleroWs/messages/diagnosticsEvent"
+
+  sendMergeAliasPayload:
+    action: send
+    channel:
+      $ref: "#/channels/eleroWs"
+    messages:
+      - $ref: "#/channels/eleroWs/messages/mergeAliasMessage"
+
   receiveConfig:
     action: receive
     channel:
@@ -383,6 +410,24 @@ operations:
 
 components:
   messages:
+    diagnosticsMessage:
+      name: diagnostics
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/DiagnosticsPayload"
+
+    diagnosticsEvent:
+      name: diagnostics
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/DiagnosticsEnvelope"
+
+    mergeAliasMessage:
+      name: merge_alias
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/MergeAliasPayload"
+
     configEvent:
       name: config
       title: Configuration Event
@@ -600,6 +645,77 @@ components:
         $ref: "#/components/schemas/LearnInCancelPayload"
 
   schemas:
+    DiagnosticsPayload:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: diagnostics
+      description: Read-only counters and queue state; never issues RF CHECK.
+    MergeAliasPayload:
+      type: object
+      required: [type, canonical, duplicate]
+      properties:
+        type:
+          type: string
+          const: merge_alias
+        canonical:
+          type: string
+        duplicate:
+          type: string
+      description: Explicit saved-cover merge. Canonical settings survive; duplicate is deleted after saving the alias. Rejections emit error; success emits device_upserted and device_removed.
+    DiagnosticsEnvelope:
+      type: object
+      required: [event, data]
+      properties:
+        event:
+          type: string
+          const: diagnostics
+        data:
+          $ref: "#/components/schemas/DiagnosticsData"
+    DiagnosticsData:
+      type: object
+      properties:
+        uptime_ms:
+          type: integer
+        tx_success:
+          type: integer
+        tx_fail:
+          type: integer
+        rx_packets:
+          type: integer
+        rx_drops:
+          type: integer
+        fifo_overflows:
+          type: integer
+        watchdog_recoveries:
+          type: integer
+        device_commands_queued:
+          type: integer
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceDiagnostics"
+    DeviceDiagnostics:
+      type: object
+      properties:
+        address:
+          type: string
+        queued:
+          type: integer
+        current_tx_retries:
+          type: integer
+        last_tx_ms:
+          type: integer
+          description: Last radio completion timestamp (0 if not yet available).
+        last_check_queued_ms:
+          type: integer
+          description: Last CHECK enqueue timestamp, not proof of transmission or response.
+        response_age_ms:
+          type: integer
+          description: Age of last received status, omitted before the first response.
+
     # ── Server → Client Envelopes ──
 
     ConfigEventEnvelope:
@@ -866,8 +982,7 @@ components:
           description: Timestamp (millis()) when last persisted to NVS (0 = YAML-defined)
           examples: [1234567]
         position_source:
-          type: string
-          enum: [unknown, time_estimated, motor_confirmed]
+          $ref: "#/components/schemas/PositionSource"
         transition_reason:
           type: string
         response_age_ms:
@@ -1038,6 +1153,9 @@ components:
         dir:
           $ref: "#/components/schemas/RfDirection"
           description: RF direction, absent on older firmware
+        tx_success:
+          type: boolean
+          description: Radio TX completion, not motor acknowledgement. TX only.
         lqi:
           type: integer
           description: Received link quality, absent on older firmware
@@ -1226,8 +1344,7 @@ components:
           $ref: "#/components/schemas/DeviceType"
         # Cover fields (device_type = "cover")
         position_source:
-          type: string
-          enum: [unknown, time_estimated, motor_confirmed]
+          $ref: "#/components/schemas/PositionSource"
         transition_reason:
           type: string
         response_age_ms:
@@ -1895,6 +2012,10 @@ components:
           description: Human-readable error message.
 
     # ── Shared Enums ──
+
+    PositionSource:
+      type: string
+      enum: [unknown, time_estimated, motor_confirmed]
 
     HaCoverState:
       type: string

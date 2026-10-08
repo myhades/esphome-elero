@@ -1,5 +1,5 @@
 import {RfActionConfig} from './RfActionConfig';
-import {AnonymousSchema_35} from './AnonymousSchema_35';
+import {PositionSource} from './PositionSource';
 import {HaCoverState} from './HaCoverState';
 interface BlindConfig {
   /**
@@ -57,7 +57,7 @@ interface BlindConfig {
    * @example 1234567
    */
   'updated_at'?: number;
-  'position_source'?: AnonymousSchema_35;
+  'position_source'?: PositionSource;
   'transition_reason'?: string;
   'response_age_ms'?: number;
   /**

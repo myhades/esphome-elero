@@ -222,6 +222,8 @@ class CommandSender : public TxClient {
   bool is_busy() const { return this->state_ != State::IDLE || !this->command_queue_.empty(); }
   bool has_pending_commands() const { return !this->command_queue_.empty(); }
   size_t queue_size() const { return this->command_queue_.size(); }
+  uint8_t current_tx_retries() const { return this->send_retries_; }
+  uint32_t last_tx_ms() const { return this->last_tx_time_; }
   EleroCommand &command() { return this->command_; }
   const EleroCommand &command() const { return this->command_; }
 

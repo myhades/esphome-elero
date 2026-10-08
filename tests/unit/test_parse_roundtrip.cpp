@@ -606,3 +606,27 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+
+TEST(TxRxRoundtrip, SyntheticRaffstoreLongUpVectorBothTargetedTypes) {
+  // Synthetic reference, frozen from the upstream encoder. Not a hardware capture
+  // and not evidence that a real motor accepts either framing type.
+  const uint8_t expected[] = {0x1d,0x07,0x69,0x00,0x0a,0x01,0x11,0x10,0x00,0x01,
+    0x10,0x00,0x01,0x10,0x00,0x01,0x01,0x20,0x00,0x01,0x00,0x04,0x40,0xb1,
+    0x15,0x96,0xc0,0xf1,0x4b,0x95};
+  for (uint8_t type : {uint8_t{0x69}, uint8_t{0x6a}}) {
+    TxParams params;
+    params.src_addr = 0x100001; params.dst_addr = 0x200001;
+    params.channel = 17; params.counter = 7; params.command = 0x21; params.type = type;
+    auto raw = build_parseable_packet(params);
+    for (size_t i = 0; i < sizeof(expected); ++i)
+      EXPECT_EQ(raw.data[i], i == pkt_offset::TYPE ? type : expected[i]);
+    auto decoded = parse_packet(raw.data, raw.len);
+    ASSERT_TRUE(decoded.valid);
+    EXPECT_EQ(decoded.type, type);
+    EXPECT_EQ(decoded.src_addr, 0x100001u);
+    EXPECT_EQ(decoded.dst_addr, 0x200001u);
+    EXPECT_EQ(decoded.channel, 17);
+    EXPECT_EQ(decoded.payload[payload_offset::COMMAND], 0x21);
+    EXPECT_EQ(decoded.counter, 7);
+  }
+}

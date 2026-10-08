@@ -87,6 +87,24 @@ jobs:
       - name: Compile ${{ matrix.test }}
         run: mise exec python uv -- uv run esphome compile tests/${{ matrix.test }}.yaml
 
+      - name: Package review artifacts with provenance
+        env:
+          TEST_CONFIG: ${{ matrix.test }}
+        run: |
+          mkdir -p review-artifacts
+          find tests/.esphome/build -type f \( -name 'firmware.factory.bin' -o -name 'firmware.ota.bin' -o -name 'firmware.elf' \) -exec cp {} review-artifacts/ \;
+          cp "tests/${TEST_CONFIG}.yaml" review-artifacts/
+          cp .mise.toml uv.lock components/elero_web/frontend/app/pnpm-lock.yaml review-artifacts/
+          git rev-parse HEAD > review-artifacts/source-commit.txt
+          printf 'CI workflow: %s/actions/runs/%s\nTest build only; not paired or validated on physical hardware.\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > review-artifacts/BUILD-NOTES.txt
+          (cd review-artifacts && sha256sum * > SHA256SUMS)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.test }}
+          path: review-artifacts/
+          retention-days: 30
+
   # Unit tests for protocol layer
   unit-tests:
     name: Unit Tests

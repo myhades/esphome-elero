@@ -38,3 +38,19 @@ test('clipboard rejection propagates for manual fallback', async () => {
   Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: async () => { throw new Error('denied') } } }, configurable: true })
   await assert.rejects(copyText('packet'), /denied/)
 })
+
+import { sanitizedBundle } from '../src/lib/diagnostics'
+
+test('sanitized bundle correlates aliases without raw frames, names or arbitrary text', () => {
+  const text = sanitizedBundle([
+    { src: '0x100001', dst: '0x200001', type: '0x69', command: '0x21', raw: 'private ciphertext', secret: 'password', dir: 'tx', tx_success: true },
+    { src: '0x300001', dst: '0x100001', type: '0xca', state: '0x0a', dir: 'rx' },
+  ], [{ address: '0x300001', command_address: '0x200001', remote: '0x100001', name: 'Bedroom', password: 'secret', command_profile: 1 }], '0.9.0+012345abcdef', { tx_fail: 2, private: 1 })
+  const bundle = JSON.parse(text)
+  assert.equal(bundle.devices[0].remote, bundle.packets[0].src)
+  assert.equal(bundle.devices[0].command_address, bundle.packets[0].dst)
+  assert.equal(bundle.devices[0].status_address, bundle.packets[1].src)
+  assert.equal(bundle.packets[0].tx_success, true)
+  assert.equal(bundle.counters.tx_fail, 2)
+  for (const secret of ['0x100001', '0x200001', '0x300001', 'Bedroom', 'password', 'ciphertext', 'private']) assert.ok(!text.includes(secret))
+})

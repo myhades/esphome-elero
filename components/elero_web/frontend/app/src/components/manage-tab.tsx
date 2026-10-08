@@ -21,7 +21,7 @@ import { Badge } from './ui/badge'
 import { InlineEdit } from './ui/inline-edit'
 import { SignalIndicator } from './signal-indicator'
 import { DiscoveryBanner } from './discovery-banner'
-import { DeviceExpandedPanel } from './device-row'
+import { DeviceExpandedPanel, HaStateCell, StatusDot as DeviceStatusDot } from './device-row'
 import {
   Blinds, Lightbulb, LightbulbOff, RemoteControl, LayoutGrid,
   ChevronUp, ChevronDown, ChevronRight, Square, Search, X, Plus,
@@ -30,10 +30,10 @@ import {
 import { cn } from '@/lib/utils'
 import {
   devices, groups, displayNames, getStateLabel, showToast, updateDevice, updateGroup,
-  hub, rebootNeeded, command, msg_type,
-  type Device, type DevicePairing, type GroupConfig,
+  hub, rebootNeeded, cancelDeviceDraft, dismissDiscovery,
+  type Device, type GroupConfig,
 } from '@/store'
-import { sendDeviceCommand, sendGroupCommand, sendRawCommand, sendRemoveGroup, sendRestart, sendUpsertDevice, sendUpsertGroup } from '@/ws'
+import { sendDeviceCommand, sendGroupCommand, sendRemoveGroup, sendRestart, sendUpsertDevice, sendUpsertGroup } from '@/ws'
 
 // ─── Row model ──────────────────────────────────────────────────────────────
 
@@ -155,21 +155,7 @@ function TypeIcon({ type }: { type: Device['type'] }) {
 // ─── Cell renderers ────────────────────────────────────────────────────────
 
 function StatusDot({ device }: { device: Device }) {
-  const unsaved = device.updated_at === null
-  const label = unsaved ? 'Unsaved' : device.enabled ? 'Saved & published' : 'Saved & unpublished'
-  return (
-    <Tooltip>
-      <TooltipTrigger>
-        <span
-          className={cn(
-            'inline-flex size-2 shrink-0 rounded-full',
-            unsaved ? 'bg-orange-400' : device.enabled ? 'bg-emerald-500' : 'bg-muted-foreground/40',
-          )}
-        />
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  )
+  return <DeviceStatusDot device={device} />
 }
 
 function NameCell({ row }: { row: Row_ }) {
@@ -195,7 +181,7 @@ function NameCell({ row }: { row: Row_ }) {
 function StateCell({ row }: { row: Row_ }) {
   return (
     <div className="flex flex-col gap-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-      <span>HA {row.haState}</span>
+      <HaStateCell device={row.device} />
       <span>RF {row.rfState}</span>
     </div>
   )
@@ -231,51 +217,29 @@ function PairedRemotesCell({ row }: { row: Row_ }) {
 
 function SaveButton({ device }: { device: Device }) {
   if (!hub.value.crud) return null
-  return (
+  return <>
+    {device.save_state && <span aria-label="Device save state" className="text-xs">{device.save_state}</span>}
+    {device.save_state && <Button variant="ghost" size="sm" onClick={() => cancelDeviceDraft(device.address)}>Cancel</Button>}
+    {device.updated_at === null && <Button variant="ghost" size="sm" onClick={() => dismissDiscovery(device.address)}>Dismiss</Button>}
     <Tooltip>
       <TooltipTrigger>
-        <Button variant="ghost" size="icon" className="size-6 text-primary hover:text-primary" onClick={() => sendUpsertDevice(device)}>
+        <Button aria-label="Save device" disabled={device.save_state === 'saving'} variant="ghost" size="icon" className="size-6 text-primary hover:text-primary" onClick={() => sendUpsertDevice(device)}>
           <Save className="size-3.5" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{device.updated_at !== null ? 'Saved — click to update' : 'Save to NVS'}</TooltipContent>
+      <TooltipContent>{device.save_state ?? (device.updated_at !== null ? 'Saved — click to update' : 'Save to NVS')}</TooltipContent>
     </Tooltip>
-  )
+  </>
 }
 
-type ManageCommand = 'up' | 'down' | 'stop' | 'tilt'
-
-const rawCommandByAction: Record<ManageCommand, string> = {
-  up: command.UP,
-  down: command.DOWN,
-  stop: command.STOP,
-  tilt: command.TILT,
-}
-
-function firstPairing(device: Device): DevicePairing | null {
-  if (device.pairings.length > 0) return device.pairings[0]
-  return device.remote ? { remote: device.remote, channel: device.channel } : null
-}
+type ManageCommand = 'up' | 'down' | 'stop' | 'tilt' | 'tilt_up' | 'tilt_down'
 
 function sendManageCommand(device: Device, action: ManageCommand) {
-  if (device.updated_at !== null) {
-    sendDeviceCommand(device, action)
+  if (device.updated_at === null || (device.save_state && action !== 'stop')) {
+    showToast('error', 'Save the device profile before using these controls. Explicit debug TX is available in the diagnostic settings.')
     return
   }
-
-  const pairing = firstPairing(device)
-  if (!pairing) {
-    showToast('error', `Cannot test ${device.name || device.address}: no paired remote/channel discovered yet`)
-    return
-  }
-
-  sendRawCommand({
-    dst_address: device.address,
-    src_address: pairing.remote,
-    channel: pairing.channel,
-    command: rawCommandByAction[action],
-    msg_type: device.type === 'cover' && action === 'stop' ? msg_type.COMMAND : msg_type.BUTTON,
-  })
+  sendDeviceCommand(device, action)
 }
 
 function InlineActions({ device }: { device: Device }) {
@@ -283,6 +247,10 @@ function InlineActions({ device }: { device: Device }) {
     return (
       <div className="flex items-center justify-end gap-0.5 text-primary">
         <SaveButton device={device} />
+        {device.command_profile === 1 && <>
+          <Button variant="ghost" size="sm" disabled={!device.supports_tilt} onClick={() => sendManageCommand(device, 'tilt_up')}>Tilt ↑</Button>
+          <Button variant="ghost" size="sm" disabled={!device.supports_tilt} onClick={() => sendManageCommand(device, 'tilt_down')}>Tilt ↓</Button>
+        </>}
         <Tooltip>
           <TooltipTrigger>
             <Button variant="ghost" size="icon" className="size-6 text-primary hover:text-primary disabled:text-muted-foreground/40 disabled:pointer-events-none" disabled={!device.supports_tilt} onClick={() => sendManageCommand(device, 'tilt')}>

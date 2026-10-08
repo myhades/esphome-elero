@@ -71,9 +71,11 @@ bool DeviceRegistry::enqueue_or_warn_(Device &dev, uint8_t cmd_byte,
 }
 
 bool DeviceRegistry::enqueue_check_(Device &dev, const char *context) {
-    return enqueue_or_warn_(dev, packet::command::CHECK,
-                            packet::limits::CHECK_PACKETS,
-                            packet::msg_type::COMMAND, context);
+    bool queued = enqueue_or_warn_(dev, packet::command::CHECK,
+                                   packet::limits::CHECK_PACKETS,
+                                   packet::msg_type::COMMAND, context);
+    if (queued) dev.rf.last_check_queued_ms = millis();
+    return queued;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -258,6 +260,33 @@ Device *DeviceRegistry::upsert(const NvsDeviceConfig &config) {
     return slot;
 }
 
+bool DeviceRegistry::merge_cover_alias(uint32_t canonical, uint32_t duplicate, std::string &error) {
+    auto *motor = find(canonical, DeviceType::COVER);
+    auto *alias = find(duplicate, DeviceType::COVER);
+    if (!motor || !alias || motor == alias || !motor->config.updated_at || !alias->config.updated_at) {
+        error = "Select two distinct saved covers"; return false;
+    }
+    if (motor->config.src_address != alias->config.src_address || motor->config.channel != alias->config.channel) {
+        error = "Remote source and control channel differ; verify identities before merging"; return false;
+    }
+    if (motor->config.command_address && motor->config.command_address != canonical &&
+        motor->config.command_destination() != alias->config.command_destination()) {
+        error = "Canonical motor already has a different command alias"; return false;
+    }
+    for (const auto &group : groups_) if (group.is_valid())
+        for (size_t i = 0; i < group.member_count; ++i) if (group.device_ids[i] == duplicate) {
+            error = "Remove the duplicate from groups before merging"; return false;
+        }
+    auto cfg = motor->config;
+    cfg.command_address = alias->config.command_destination();
+    if (!upsert(cfg)) { error = "Could not persist the canonical alias; duplicate preserved"; return false; }
+    // Two durable stages. If deletion fails, retry safely; never hide that partial state.
+    if (!remove(duplicate, DeviceType::COVER)) {
+        error = "Alias saved, but duplicate deletion failed; both records remain. Retry merge"; return false;
+    }
+    return true;
+}
+
 bool DeviceRegistry::remove(uint32_t address, DeviceType type) {
     Device *dev = find(address, type);
     if (!dev) return false;
@@ -395,6 +424,7 @@ void DeviceRegistry::command_cover(Device &dev, uint8_t cmd_byte) {
         }
     }
 
+    cover.tilt_action_active = false;
     cover.position_confirmed = false;
     cover.transition_reason = cmd_byte == packet::command::STOP ? "stop_queued" : "travel_queued";
     notify_state_changed_(dev, now);
@@ -427,6 +457,7 @@ void DeviceRegistry::set_cover_position(Device &dev, float target) {
                                         "set_cover_position");
     if (!move_queued) { cover.target_position = cover_sm::NO_TARGET; return; }
     cover.position_confirmed = false;
+    cover.tilt_action_active = false;
     cover.transition_reason = "position_queued";
     (void) enqueue_check_(dev, "set_cover_position");
     cover.state = cover_sm::on_command(cover.state, cmd, now, ctx);
@@ -452,6 +483,7 @@ void DeviceRegistry::command_cover_tilt(Device &dev) {
                                         "command_cover_tilt");
     (void) enqueue_check_(dev, "command_cover_tilt");
     if (!tilt_queued) return;
+    cover.tilt_action_active = dev.config.command_profile == 1;
     cover.transition_reason = "preset_queued";
     if (dev.config.command_profile == 0)
         cover.state = cover_sm::on_command(cover.state, packet::command::TILT, now, ctx);
@@ -468,6 +500,7 @@ void DeviceRegistry::command_cover_tilt_step(Device &dev, bool up) {
     if (!dev.sender.enqueue_encoded(encoding, packet::button::PACKETS)) return;
     (void) enqueue_check_(dev, "tilt_step");
     auto &cover = std::get<CoverDevice>(dev.logic);
+    cover.tilt_action_active = true;
     cover.transition_reason = up ? "tilt_up_queued" : "tilt_down_queued";
     cover.poll.on_command_sent(millis());
     notify_state_changed_(dev, millis());
@@ -754,6 +787,7 @@ void DeviceRegistry::request_check(Device &dev) {
 void DeviceRegistry::on_rf_packet(const RfPacketInfo &pkt, uint32_t now) {
     // Notify all adapters of raw RF packet (web UI needs this)
     notify_rf_packet_(pkt);
+    if (pkt.is_tx) return; // TX telemetry must never act as received motor/remote evidence.
 
     if (packet::is_status_packet(pkt.type)) {
         // Status packets: src is the blind/light reporting status
@@ -771,12 +805,25 @@ void DeviceRegistry::on_rf_packet(const RfPacketInfo &pkt, uint32_t now) {
         for (auto &dev : slots_) {
             if (!dev.active || !dev.is_cover() || dev.config.command_destination() != pkt.dst ||
                 dev.config.src_address != pkt.src || dev.config.channel != pkt.channel) continue;
+            auto &observed_cover = std::get<CoverDevice>(dev.logic);
+            if (dev.config.command_profile == 1 &&
+                pkt.command != cover_encoding(dev.config, CoverAction::UP).payload[4] &&
+                pkt.command != cover_encoding(dev.config, CoverAction::DOWN).payload[4] &&
+                pkt.command != cover_encoding(dev.config, CoverAction::STOP).payload[4] &&
+                (cover_encoding(dev.config, CoverAction::TILT_UP).payload[4] == pkt.command ||
+                 cover_encoding(dev.config, CoverAction::TILT_DOWN).payload[4] == pkt.command)) {
+                observed_cover.tilt_action_active = true;
+                observed_cover.transition_reason = "observed_tilt_command";
+                notify_state_changed_(dev, now);
+                continue;
+            }
             for (CoverAction action : {CoverAction::UP, CoverAction::DOWN, CoverAction::STOP}) {
                 if (cover_encoding(dev.config, action).payload[4] != pkt.command) continue;
                 const uint8_t semantic = action == CoverAction::UP ? packet::command::UP :
                     action == CoverAction::DOWN ? packet::command::DOWN : packet::command::STOP;
                 auto &cover = std::get<CoverDevice>(dev.logic);
                 cover.state = cover_sm::on_command(cover.state, semantic, now, cover_context(dev.config));
+                cover.tilt_action_active = false;
                 cover.position_confirmed = false;
                 cover.transition_reason = "observed_remote_command";
                 if (semantic == packet::command::STOP) cover.target_position = cover_sm::NO_TARGET;
@@ -791,7 +838,10 @@ void DeviceRegistry::dispatch_status_(Device &dev, uint8_t state_byte, uint32_t 
     std::visit(overloaded{
         [&](CoverDevice &cover) {
             auto ctx = cover_context(dev.config);
-            cover.state = cover_sm::on_rf_status(cover.state, state_byte, now, ctx);
+            const bool generic_motion = state_byte == packet::state::MOVING_UP || state_byte == packet::state::MOVING_DOWN ||
+                state_byte == packet::state::START_MOVING_UP || state_byte == packet::state::START_MOVING_DOWN;
+            if (!(cover.tilt_action_active && generic_motion))
+                cover.state = cover_sm::on_rf_status(cover.state, state_byte, now, ctx);
             if (state_byte == packet::state::TOP || state_byte == packet::state::BOTTOM ||
                 state_byte == packet::state::TOP_TILT || state_byte == packet::state::BOTTOM_TILT)
                 cover.position_known = true;

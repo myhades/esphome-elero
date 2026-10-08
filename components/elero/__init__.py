@@ -1,3 +1,6 @@
+import hashlib
+from pathlib import Path
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
@@ -181,7 +184,17 @@ async def to_code(config):
     cg.add(var.set_freq1(config[CONF_FREQ1]))
     cg.add(var.set_freq2(config[CONF_FREQ2]))
 
-    cg.add(var.set_version(ELERO_VERSION))
+    # Content identity works for both git and copied external-component trees.
+    digest = hashlib.sha256()
+    component_root = Path(__file__).resolve().parent.parent
+    for folder in sorted(component_root.glob("elero*")):
+        for source in sorted(folder.glob("*")):
+            if source.name.startswith("mongoose") or source.name == "elero_web_ui.h":
+                continue
+            if source.is_file() and source.suffix in {".cpp", ".h", ".py"}:
+                digest.update(source.relative_to(component_root).as_posix().encode())
+                digest.update(source.read_bytes().replace(b"\r\n", b"\n"))
+    cg.add(var.set_version(f"{ELERO_VERSION}+{digest.hexdigest()[:12]}"))
 
     # Create device registry and wire to hub
     registry = cg.new_Pvariable(config[CONF_REGISTRY_ID])

@@ -38,3 +38,20 @@ test('BOTTOM_TILT preserves saved cover type and RF updates preserve projected s
   assert.equal(dev.type, 'cover')
   assert.equal((dev.lastStatus as unknown as { ha_state: string }).ha_state, 'closed')
 })
+
+test('TX diagnostics never discover a remote or motor', () => {
+  devices.value = new Map()
+  clearRfPackets()
+  addRfPacket({ src: '0x100001', dst: '0x200001', channel: 17, type: '0x69', command: '0x21', dir: 'tx', tx_success: true } as RfPacketWithTimestamp)
+  assert.equal(devices.value.size, 0)
+  assert.equal(rfPackets.value.length, 1)
+})
+
+test('long capture bounds provisional discoveries and preserves saved identity', () => {
+  devices.value = new Map()
+  onDeviceUpserted({ address: '0x300001', device_type: 'cover', updated_at: 1 })
+  for (let i = 1; i <= 3000; i++) addRfPacket({ src: `0x${i.toString(16).padStart(6, '0')}`, dst: '0x200001', type: '0x69', channel: 17 } as RfPacketWithTimestamp)
+  assert.ok(devices.value.size <= 512)
+  assert.ok(devices.value.has('0x300001'))
+  assert.equal(rfPackets.value.length, 1000)
+})

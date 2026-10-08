@@ -1,10 +1,10 @@
 import { appendBounded } from './lib/diagnostics'
-import type { CmdPayload, RawPayload, UpsertDevicePayload, RemoveDevicePayload, RestartPayload, SetHubConfigPayload, DeviceAction, StateChangedData, HubConfigEventData, ExportConfigPayload, ImportConfigPayload, ConfigSnapshot, ImportResult, LearnInStartPayload, LearnInConfirmUpPayload, LearnInConfirmDownPayload, LearnInCancelPayload, LearnInStateData, UpsertGroupPayload, RemoveGroupPayload, GroupCmdPayload, GroupConfig, GroupRemovedData, ErrorData } from '@/generated'
+import type { DiagnosticsPayload, MergeAliasPayload, CmdPayload, RawPayload, UpsertDevicePayload, RemoveDevicePayload, RestartPayload, SetHubConfigPayload, DeviceAction, StateChangedData, HubConfigEventData, ExportConfigPayload, ImportConfigPayload, ConfigSnapshot, ImportResult, LearnInStartPayload, LearnInConfirmUpPayload, LearnInConfirmDownPayload, LearnInCancelPayload, LearnInStateData, UpsertGroupPayload, RemoveGroupPayload, GroupCmdPayload, GroupConfig, GroupRemovedData, ErrorData } from '@/generated'
 import {
   setConnected, setDevices, addRfPacket,
   onDeviceUpserted, onDeviceRemoved, onStateChanged, onHubConfig,
   onConfigSnapshot, onImportResult, onLearnInState, onGroupUpserted, onGroupRemoved,
-  devices, showToast, diagnosticLogs, websocketErrors, markSaving, failPendingSaves,
+  devices, showToast, deviceDiagnostics, gatewayDiagnostics, logCapturePaused, diagnosticLogs, websocketErrors, markSaving, failPendingSaves,
   type Device,
 } from './store'
 
@@ -56,10 +56,13 @@ export function initWs() {
     const { event, data } = message
     if (event === 'config') {
       setDevices(data)
+    } else if (event === 'diagnostics') {
+      deviceDiagnostics.value = Array.isArray(data.devices) ? data.devices.slice(0, 48) : []
+      gatewayDiagnostics.value = Object.fromEntries(Object.entries(data).filter((entry): entry is [string, number] => typeof entry[1] === 'number'))
     } else if (event === 'tx_queued') {
       showToast(data.accepted ? 'success' : 'error', data.accepted ? 'TX queued; motor acknowledgement not verified.' : 'TX queue rejected the command.')
     } else if (event === 'log') {
-      if (typeof data.msg === 'string' && typeof data.tag === 'string') diagnosticLogs.value = appendBounded(diagnosticLogs.value, { t: Number(data.t), tag: data.tag.slice(0, 64), level: Number(data.level), msg: data.msg.slice(0, 2048) }, 300)
+      if (!logCapturePaused.value && typeof data.msg === 'string' && typeof data.tag === 'string') diagnosticLogs.value = appendBounded(diagnosticLogs.value, { t: Number(data.t), tag: data.tag.slice(0, 64), level: Number(data.level), msg: data.msg.slice(0, 2048) }, 300)
     } else if (event === 'rf') {
       data.received_at = Date.now()
       addRfPacket(data)
@@ -90,7 +93,7 @@ export function initWs() {
 
 // ─── Send helpers ───────────────────────────────────────────────────────────
 
-function send(payload: CmdPayload | RawPayload | UpsertDevicePayload | RemoveDevicePayload | RestartPayload | SetHubConfigPayload | ExportConfigPayload | ImportConfigPayload | LearnInStartPayload | LearnInConfirmUpPayload | LearnInConfirmDownPayload | LearnInCancelPayload | UpsertGroupPayload | RemoveGroupPayload | GroupCmdPayload) {
+function send(payload: DiagnosticsPayload | MergeAliasPayload | CmdPayload | RawPayload | UpsertDevicePayload | RemoveDevicePayload | RestartPayload | SetHubConfigPayload | ExportConfigPayload | ImportConfigPayload | LearnInStartPayload | LearnInConfirmUpPayload | LearnInConfirmDownPayload | LearnInCancelPayload | UpsertGroupPayload | RemoveGroupPayload | GroupCmdPayload) {
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload))
   } else {
@@ -191,4 +194,12 @@ export function sendLearnInConfirmDown() {
 
 export function sendLearnInCancel() {
   send({ type: 'learn_in_cancel' })
+}
+
+// Read-only status; does not issue CHECK or any other RF command.
+export function requestDiagnostics() { send({ type: 'diagnostics' }) }
+
+export function sendMergeAlias(canonical: string, duplicate: string) {
+  if (confirm(`Keep ${canonical} as the motor identity and its settings, link the command address from ${duplicate}, then delete the duplicate? Back up NVS first. This does not transmit RF.`))
+    send({ type: 'merge_alias', canonical, duplicate })
 }

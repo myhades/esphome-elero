@@ -8,10 +8,10 @@ import { ChevronUp, Square, ChevronDown, Shrink, Lightbulb, LightbulbOff, Settin
 import { cn } from '@/lib/utils'
 import {
   updateDevice, cancelDeviceDraft, dismissDiscovery, getStateLabel, getCommandLabel, isCommandPacket, isButtonPacket,
-  rfPackets, hub, displayNames,
+  rfPackets, hub, displayNames, devices,
   type Device, type RfPacketWithTimestamp,
 } from '@/store'
-import { sendDeviceCommand, sendRawCommand, sendUpsertDevice, sendRemoveDevice } from '@/ws'
+import { sendDeviceCommand, sendMergeAlias, sendRawCommand, sendUpsertDevice, sendRemoveDevice } from '@/ws'
 
 // ─── Shared cell renderers (used by DataTable column definitions) ───────────
 
@@ -78,7 +78,7 @@ export function HaStateCell({ device }: { device: Device }) {
   const status = device.lastStatus as Record<string, unknown> | null
   const haState = (status?.ha_state as string | undefined)?.toUpperCase() ?? '—'
   return (
-    <span className="text-[10px] text-muted-foreground" title={typeof status?.transition_reason === 'string' ? status.transition_reason : ''}>
+    <span className="text-[10px] text-muted-foreground" title={`${typeof status?.transition_reason === 'string' ? status.transition_reason : ''}; response age at snapshot: ${typeof status?.response_age_ms === 'number' ? status.response_age_ms + ' ms' : 'unknown'}`}>
         {haState}<br />{status?.position_source === 'time_estimated' ? 'Estimated' : status?.position_source === 'motor_confirmed' ? 'Motor confirmed' : 'Position unknown'}
       </span>
   )
@@ -196,7 +196,7 @@ export function DeviceActions({ device, expanded, onToggleExpand }: {
             variant="ghost"
             size="icon"
             className={cn('size-7 text-primary hover:text-primary', expanded && 'bg-muted')}
-            onClick={onToggleExpand}
+            aria-label="Device settings" onClick={onToggleExpand}
           >
             <Settings className="size-3.5" />
           </Button>
@@ -211,9 +211,9 @@ export function DeviceActions({ device, expanded, onToggleExpand }: {
 
 function replayPacket(pkt: RfPacketWithTimestamp, device: Device) {
   sendRawCommand({
-    dst_address: device.address,
-    src_address: device.remote,
-    channel: device.channel,
+    dst_address: pkt.dst || device.command_address || device.address,
+    src_address: pkt.src || device.remote,
+    channel: pkt.channel ?? device.channel,
     command: pkt.command ?? '0x00',
     msg_type: pkt.type,
     type2: pkt.type2,
@@ -260,6 +260,7 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 export function DeviceExpandedPanel({ device }: { device: Device }) {
   const crudEnabled = hub.value.crud
   const actionError = useSignal('')
+  const mergeAddress = useSignal('')
   const packets = rfPackets.value
 
   const commandPackets = deduplicatePackets(
@@ -297,7 +298,7 @@ export function DeviceExpandedPanel({ device }: { device: Device }) {
           <input className="block rounded border p-2" type="number" min={0} max={255} value={device.channel} onInput={e => updateDevice(device.address, { channel: Number(e.currentTarget.value) })} />
         </label>
         <details className="sm:col-span-2"><summary>Advanced per-action encoding (UP, DOWN, STOP, tilt up, tilt down, preset, CHECK)</summary>
-          <p>Numeric bytes. Enable only captured, validated overrides. Destination 0 selects command alias; 1 selects motor status source. 0x69 acceptance is unverified.</p>
+          <p>Numeric bytes. Enable only captured, validated overrides. Destination 0 selects command alias; 1 selects motor status source. 0x44 uses channel broadcasts without a motor destination or targeted payload prefix. 0x69 acceptance is unverified.</p>
           <textarea className="h-40 w-full rounded border p-2 font-mono" defaultValue={JSON.stringify(device.actions, null, 2)} onChange={e => {
             try {
               const value = JSON.parse(e.currentTarget.value)
@@ -306,6 +307,15 @@ export function DeviceExpandedPanel({ device }: { device: Device }) {
             } catch (error) { actionError.value = String(error) }
           }} /><p role="alert">{actionError.value}</p>
         </details>
+        {device.updated_at !== null && <div className="sm:col-span-2">
+          <label>Saved duplicate to merge into this motor
+            <select value={mergeAddress.value} onChange={e => { mergeAddress.value = e.currentTarget.value }}>
+              <option value="">Select explicitly…</option>
+              {[...devices.value.values()].filter(d => d.type === 'cover' && d.updated_at !== null && d.address !== device.address).map(d => <option key={d.address} value={d.address}>{d.name || d.address} ({d.address})</option>)}
+            </select>
+          </label>
+          <Button variant="outline" size="sm" disabled={!mergeAddress.value || !!device.save_state} onClick={() => sendMergeAlias(device.address, mergeAddress.value)}>Merge saved alias</Button>
+        </div>}
         <p className="sm:col-span-2">Save explicitly. A linked alias suppresses provisional duplicates. Native Home Assistant registration requires reboot after saving. Editing the canonical address is only available for provisional devices.</p>
       </div>}
       {/* Config row */}
@@ -369,7 +379,7 @@ export function DeviceExpandedPanel({ device }: { device: Device }) {
                     variant="ghost"
                     size="icon"
                     className="size-7 text-muted-foreground/50 hover:text-destructive"
-                    onClick={() => sendRemoveDevice(device.address, device.type === 'light' ? 'light' : 'cover')}
+                    aria-label="Delete saved device" onClick={() => sendRemoveDevice(device.address, device.type === 'light' ? 'light' : 'cover')}
                   >
                     <Trash2 className="size-3" />
                   </Button>

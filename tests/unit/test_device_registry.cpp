@@ -1312,3 +1312,71 @@ TEST_F(DeviceRegistryTest, TiltDirectionsLeaveHeightAloneAndStopPreemptsQueue) {
 
 // Reuse this translation unit's ESPHome stubs for the snapshot projection cases.
 #include "test_state_snapshot.cpp"
+
+TEST_F(DeviceRegistryTest, TransmitterCompletionIsDiagnosticOnlyAndCopiesRawFrame) {
+    auto *dev = add_cover();
+    EleroCommand cmd{};
+    cmd.src_addr = dev->config.src_address; cmd.dst_addr = dev->config.dst_address;
+    cmd.channel = dev->config.channel; cmd.type = 0x69; cmd.counter = 42; cmd.payload[4] = 0x20;
+    uint8_t raw[80]{}; raw[0] = 29; raw[1] = 42;
+    auto pkt = tx_diagnostic(cmd, raw, sizeof(raw), false, 123);
+    EXPECT_EQ(pkt.raw_len, sizeof(pkt.raw));
+    raw[1] = 99;
+    EXPECT_EQ(pkt.raw[1], 42);
+    EXPECT_EQ(pkt.cnt, 42);
+    EXPECT_FALSE(pkt.tx_success);
+    registry_.on_rf_packet(pkt, 123);
+    EXPECT_EQ(registry_.find(cmd.src_addr, DeviceType::REMOTE), nullptr);
+    EXPECT_EQ(compute_cover_snapshot(*dev, 123).operation, cover_sm::Operation::IDLE);
+    EXPECT_EQ(dev->rf.last_seen_ms, 0u);
+}
+
+TEST_F(DeviceRegistryTest, InvalidPersistedProfileIsRejectedWithoutMutatingRegistry) {
+    auto cfg = make_cover_config(0x300001);
+    cfg.actions[0] = {1, 0x21, 0xca, 0, 0, 0, 4, 0};
+    EXPECT_EQ(registry_.upsert(cfg), nullptr); // Never TX a STATUS type from corrupt NVS.
+    cfg.actions[0].type = 0x69;
+    cfg.endpoint_margin_ms = 30001;
+    EXPECT_EQ(registry_.upsert(cfg), nullptr);
+    cfg.endpoint_margin_ms = 2000;
+    EXPECT_NE(registry_.upsert(cfg), nullptr);
+}
+
+TEST_F(DeviceRegistryTest, TiltStatusDoesNotBecomeFullHeightTravel) {
+    auto cfg = make_cover_config(0x300001);
+    cfg.command_profile = 1; cfg.supports_tilt = 1;
+    auto *dev = registry_.upsert(cfg);
+    registry_.command_cover_tilt_step(*dev, true);
+    registry_.on_rf_packet(make_status_pkt(cfg.dst_address, pkt::state::MOVING_UP), 1000);
+    EXPECT_EQ(compute_cover_snapshot(*dev, 1000).operation, cover_sm::Operation::IDLE);
+    EXPECT_EQ(dev->rf.last_state_raw, pkt::state::MOVING_UP);
+    registry_.command_cover(*dev, pkt::command::UP);
+    EXPECT_EQ(compute_cover_snapshot(*dev, 1000).operation, cover_sm::Operation::OPENING);
+}
+
+TEST_F(DeviceRegistryTest, ExplicitMergePersistsCanonicalAndRejectsUnrelatedRemote) {
+    registry_.set_nvs_enabled(true);
+    registry_.init_preferences();
+    auto canonical = make_cover_config(0x300001);
+    auto duplicate = make_cover_config(0x200001);
+    ASSERT_NE(registry_.upsert(canonical), nullptr);
+    duplicate.channel++;
+    ASSERT_NE(registry_.upsert(duplicate), nullptr);
+    std::string error;
+    EXPECT_FALSE(registry_.merge_cover_alias(canonical.dst_address, duplicate.dst_address, error));
+    EXPECT_NE(registry_.find(duplicate.dst_address), nullptr);
+    duplicate.channel = canonical.channel;
+    ASSERT_NE(registry_.upsert(duplicate), nullptr);
+    error.clear();
+    esphome::preference_save_fails = true;
+    EXPECT_FALSE(registry_.merge_cover_alias(canonical.dst_address, duplicate.dst_address, error));
+    EXPECT_NE(registry_.find(duplicate.dst_address), nullptr);
+    esphome::preference_save_fails = false;
+    error.clear();
+    EXPECT_TRUE(registry_.merge_cover_alias(canonical.dst_address, duplicate.dst_address, error));
+    DeviceRegistry rebooted;
+    rebooted.set_nvs_enabled(true); rebooted.restore_all();
+    EXPECT_EQ(rebooted.find(duplicate.dst_address), nullptr);
+    ASSERT_NE(rebooted.find(canonical.dst_address), nullptr);
+    EXPECT_EQ(rebooted.find(canonical.dst_address)->config.command_address, duplicate.dst_address);
+}

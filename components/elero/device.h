@@ -28,6 +28,7 @@ namespace esphome::elero {
 
 struct RfMeta {
     uint32_t last_seen_ms{0};
+    uint32_t last_check_queued_ms{0};
     float    last_rssi{0.0f};
     uint8_t  last_state_raw{0};
 };
@@ -43,6 +44,7 @@ struct CoverDevice {
     float           target_position{cover_sm::NO_TARGET};  ///< NO_TARGET = no target, 0..1 = intermediate target
     cover_sm::Operation last_direction{cover_sm::Operation::OPENING};  ///< For toggle logic
     bool            tilted{false};
+    bool            tilt_action_active{false};
     bool            position_known{false};
     bool            position_confirmed{false};
     const char *transition_reason{"boot"};

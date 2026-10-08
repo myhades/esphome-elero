@@ -6,7 +6,7 @@ import { type Column } from './ui/data-table'
 import { Blinds, Lightbulb, Copy, CheckCircle2, RemoteControl } from './icons'
 import {
   isStatusPacket, isCommandPacket, isButtonPacket,
-  getMsgTypeLabel, getCommandLabel, getStateLabel,
+  getMsgTypeLabel, getCommandLabel, getStateLabel, devices,
   type RfPacketWithTimestamp, type AppDeviceType,
 } from '@/store'
 import { cn } from '@/lib/utils'
@@ -105,7 +105,13 @@ export function buildFullColumns(
       render: (pkt) => <span className="text-muted-foreground">{formatTime(pkt.received_at)}</span>,
     },
     { key: 'dir', label: 'Direction', value: pkt => pkt.dir ?? 'unknown', render: pkt => <span>{pkt.dir ?? 'unknown'}</span> },
+    { key: 'tx_success', label: 'Radio TX', render: pkt => <span>{pkt.dir !== 'tx' ? '—' : pkt.tx_success ? 'Completed (unacknowledged)' : 'Failed'}</span> },
     { key: 'quality', label: 'LQI / CRC', render: pkt => <span>{pkt.lqi ?? '-'} / {pkt.crc == null ? 'unknown' : pkt.crc ? 'valid' : 'invalid'}</span> },
+    { key: 'control_channel', label: 'Control CH', render: pkt => {
+      const linked = [...devices.value.values()].find(d => d.type === 'cover' && (d.address === pkt.src ||
+        (d.remote === pkt.src && (d.command_address === pkt.dst || pkt.type === '0x44') && d.channel === pkt.channel)))
+      return <span>{linked?.channel ?? '—'}</span>
+    } },
     { key: 'cnt', label: 'Counter', render: pkt => <span>{pkt.cnt}</span> },
     {
       key: 'source', label: 'Source', sortable: true, filter: 'select',

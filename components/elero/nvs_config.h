@@ -118,8 +118,15 @@ struct NvsDeviceConfig : NvsDeviceConfigV3 {
 
   NvsDeviceConfig() { version = NVS_CONFIG_VERSION; }
   bool is_valid() const {
-    return version == NVS_CONFIG_VERSION && dst_address > 0 && dst_address <= 0xFFFFFF &&
-           command_address <= 0xFFFFFF && src_address <= 0xFFFFFF && command_profile <= 1;
+    if (version != NVS_CONFIG_VERSION || dst_address == 0 || dst_address > 0xFFFFFF ||
+        command_address > 0xFFFFFF || src_address > 0xFFFFFF || command_profile > 1 ||
+        endpoint_margin_ms > 30000 || static_cast<uint8_t>(type) > static_cast<uint8_t>(DeviceType::REMOTE))
+      return false;
+    for (const auto &action : actions) {
+      if (action.enabled > 1 || action.destination > 1) return false;
+      if (action.enabled && action.type != 0x44 && action.type != 0x69 && action.type != 0x6a) return false;
+    }
+    return true;
   }
   uint32_t command_destination() const { return command_address ? command_address : dst_address; }
 };

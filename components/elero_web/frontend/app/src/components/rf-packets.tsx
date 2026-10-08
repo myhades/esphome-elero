@@ -1,12 +1,14 @@
+import { requestDiagnostics } from '@/ws'
 import { useSignal } from '@preact/signals'
 import { Card } from './ui/card'
 import { buildFullColumns } from './packet-table'
-import { rfPackets, displayNames, deviceTypeMap, clearRfPackets, capturePaused, captureDropped, diagnosticLogs, websocketErrors, resetDismissedDiscoveries } from '@/store'
-import { CAPTURE_LIMIT, copyText, downloadText, serializeCapture } from '@/lib/diagnostics'
+import { rfPackets, displayNames, deviceTypeMap, clearRfPackets, capturePaused, captureDropped, diagnosticLogs, websocketErrors, resetDismissedDiscoveries, hub, devices, deviceDiagnostics, gatewayDiagnostics, logCapturePaused } from '@/store'
+import { CAPTURE_LIMIT, copyText, downloadText, serializeCapture, sanitizedBundle } from '@/lib/diagnostics'
 import { DataTable } from './ui/data-table'
 
 export function RfPackets() {
   const query = useSignal('')
+  const logQuery = useSignal('')
   const feedback = useSignal('')
   const fallback = useSignal('')
   const selected = useSignal<Set<object>>(new Set())
@@ -18,8 +20,7 @@ export function RfPackets() {
     selected.value = next
   }} /> })
   const selectedRows = data.filter(pkt => selected.value.has(pkt))
-  const copy = async (rows: object[]) => {
-    const text = serializeCapture(rows, 'json')
+  const copyPayload = async (text: string) => {
     try { await copyText(text); feedback.value = 'Copied'; fallback.value = '' }
     catch (error) { feedback.value = String(error); fallback.value = text }
   }
@@ -30,34 +31,47 @@ export function RfPackets() {
       feedback.value = 'Download requested. Check your browser downloads.'
     } catch (error) { feedback.value = String(error); fallback.value = text }
   }
+  const logs = diagnosticLogs.value.filter(log => `${log.tag} ${log.msg}`.toLowerCase().includes(logQuery.value.toLowerCase()))
   return <Card className="gap-0 overflow-hidden p-0">
     <div className="space-y-2 border-b border-border px-5 py-4">
       <h2 className="text-sm font-semibold">RF Diagnostics</h2>
+      <p className="text-xs">Firmware source: {hub.value.version || 'unknown'}. TX completed means the radio finished; it does not confirm motor execution.</p>
       <p className="text-xs">{rfPackets.value.length}/{CAPTURE_LIMIT} retained; {captureDropped.value} overwritten. Capture {capturePaused.value ? 'paused' : 'running'}.</p>
       <p className="text-xs">Header CH in STATUS is not the configured control channel. Missing fields mean unavailable. Decoded captures are not proof of motor acknowledgement.</p>
       <div className="flex flex-wrap items-center gap-2 text-xs [&_button]:rounded-md [&_button]:border [&_button]:px-3 [&_button]:py-2 [&_button]:hover:bg-accent [&_button]:disabled:opacity-40">
         <input className="h-8 rounded-md border bg-background px-2" aria-label="Filter capture" placeholder="Address, type, state or timestamp" value={query.value} onInput={e => { query.value = e.currentTarget.value }} />
         <button onClick={() => { capturePaused.value = !capturePaused.value }}>{capturePaused.value ? 'Resume capture' : 'Pause capture'}</button>
+        <button onClick={requestDiagnostics}>Refresh gateway diagnostics</button>
+        <button onClick={() => {
+          const text = sanitizedBundle(data, [...devices.value.values()].map(d => ({ ...d, ...deviceDiagnostics.value.find(r => r.address === d.address) })), hub.value.version, gatewayDiagnostics.value)
+          try { downloadText(text, 'elero-diagnostic-bundle.json', 'application/json'); feedback.value = 'Sanitized bundle download requested; addresses pseudonymized, raw frames and logs omitted.' }
+          catch (error) { feedback.value = String(error); fallback.value = text }
+        }}>Download sanitized bundle</button>
         <button onClick={resetDismissedDiscoveries}>Reset dismissed discoveries</button>
         <button onClick={() => { clearRfPackets(); selected.value = new Set() }}>Clear capture</button>
-        <button disabled={!data.length} onClick={() => copy(data)}>Copy filtered</button>
-        <button disabled={!selectedRows.length} onClick={() => copy(selectedRows)}>Copy selected ({selectedRows.length})</button>
+        <button disabled={!data.length} onClick={() => copyPayload(serializeCapture(data, 'json'))}>Copy filtered</button>
+        <button disabled={!selectedRows.length} onClick={() => copyPayload(serializeCapture(selectedRows, 'json'))}>Copy selected ({selectedRows.length})</button>
         {(['json', 'jsonl', 'csv'] as const).map(format => <button key={format} onClick={() => download(format)}>Download {format.toUpperCase()}</button>)}
       </div>
       <p role="status">{feedback.value}</p>
       {fallback.value && <textarea aria-label="Capture manual copy" className="w-full h-40 rounded-md border p-2 font-mono text-xs" readOnly value={fallback.value} onFocus={e => e.currentTarget.select()} />}
     </div>
+    <pre className="px-5 text-xs overflow-auto">{JSON.stringify({ ...gatewayDiagnostics.value, devices: deviceDiagnostics.value }, null, 2)}</pre>
     <p className="px-5">WebSocket parse errors: {websocketErrors.value}</p>
     <DataTable columns={columns} data={data} rowKey={(pkt, i) => `${pkt.t}-${i}`}
       defaultSort={{ key: 'time', direction: 'desc' }} maxHeight="500px" tableClass="font-mono" filterable={false}
       emptyMessage="No packets in this capture. Reception requires a connected gateway; pause and export before clearing." />
     <details className="p-5"><summary>Gateway logs (latest 300)</summary>
+      <p>Log exports retain their original text; review them before sharing.</p>
+      <input aria-label="Filter logs" value={logQuery.value} onInput={e => { logQuery.value = e.currentTarget.value }} />
+      <button onClick={() => { logCapturePaused.value = !logCapturePaused.value }}>{logCapturePaused.value ? 'Resume logs' : 'Pause logs'}</button>
+      <button onClick={() => copyPayload(JSON.stringify(logs, null, 2))}>Copy logs</button>
       <button onClick={() => { diagnosticLogs.value = [] }}>Clear logs</button>
       <button onClick={() => {
-        try { downloadText(JSON.stringify(diagnosticLogs.value, null, 2), 'elero-logs.json', 'application/json'); feedback.value = 'Log download requested' }
-        catch (error) { feedback.value = String(error); fallback.value = JSON.stringify(diagnosticLogs.value, null, 2) }
+        try { downloadText(JSON.stringify(logs, null, 2), 'elero-logs.json', 'application/json'); feedback.value = 'Log download requested' }
+        catch (error) { feedback.value = String(error); fallback.value = JSON.stringify(logs, null, 2) }
       }}>Download logs</button>
-      <pre className="max-h-64 overflow-auto">{diagnosticLogs.value.map(log => `${log.t} [${log.level}] ${log.tag}: ${log.msg}`).join('\n')}</pre>
+      <pre className="max-h-64 overflow-auto">{logs.map(log => `${log.t} [${log.level}] ${log.tag}: ${log.msg}`).join('\n')}</pre>
     </details>
   </Card>
 }

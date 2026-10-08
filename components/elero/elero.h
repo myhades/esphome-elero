@@ -38,6 +38,8 @@ namespace elero {
 
 /// Decoded RF packet info for WebSocket broadcast
 struct RfPacketInfo {
+  bool is_tx{false};
+  bool tx_success{false};  ///< Radio completion only, never motor acknowledgement
   uint32_t timestamp_ms;
   int64_t decoded_at_us{0};  ///< esp_timer_get_time() when decode completed (us, for latency tracking)
   uint32_t src;           ///< Source address (remote for commands, blind for status)
@@ -56,6 +58,21 @@ struct RfPacketInfo {
   uint8_t raw_len;
   uint8_t raw[CC1101_FIFO_LENGTH];
 };
+
+/// Copy an immutable driver-completion diagnostic for transport to the main loop.
+inline RfPacketInfo tx_diagnostic(const EleroCommand &cmd, const uint8_t *raw,
+                                  size_t length, bool success, uint32_t now) {
+  RfPacketInfo pkt{};
+  pkt.is_tx = true;
+  pkt.tx_success = success;
+  pkt.timestamp_ms = now;
+  pkt.src = cmd.src_addr; pkt.dst = cmd.type == packet::msg_type::BUTTON ? 0 : cmd.dst_addr;
+  pkt.channel = cmd.channel; pkt.type = cmd.type; pkt.type2 = cmd.type2;
+  pkt.hop = cmd.hop; pkt.cnt = cmd.counter; pkt.command = cmd.payload[4];
+  pkt.raw_len = length > sizeof(pkt.raw) ? sizeof(pkt.raw) : length;
+  for (size_t i = 0; i < pkt.raw_len; ++i) pkt.raw[i] = raw[i];
+  return pkt;
+}
 
 // String conversion declarations (elero_state_to_string, etc.) are in elero_strings.h
 
@@ -78,6 +95,7 @@ struct RfTaskRequest {
 struct TxResult {
   TxClient *client{nullptr};  ///< nullptr for fire-and-forget (raw TX)
   bool success{false};
+  RfPacketInfo packet{};
 };
 
 }  // namespace elero
@@ -156,6 +174,13 @@ class Elero : public Component {
 
   void set_version(const char *version) { version_ = version; }
   const char *get_version() const { return version_; }
+  uint32_t diagnostic_tx_success() const { return stat_tx_success_; }
+  uint32_t diagnostic_tx_fail() const { return stat_tx_fail_; }
+  uint32_t diagnostic_rx_packets() const { return stat_rx_packets_; }
+  uint32_t diagnostic_rx_drops() const { return stat_rx_drops_.load(); }
+  uint32_t diagnostic_fifo_overflows() const { return stat_fifo_overflows_.load(); }
+  uint32_t diagnostic_watchdog_recoveries() const { return stat_watchdog_recoveries_.load(); }
+
 
   // Unified device registry
   void set_registry(DeviceRegistry *reg) { registry_ = reg; }

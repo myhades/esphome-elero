@@ -415,6 +415,33 @@ void EleroWebServer::handle_ws_message(struct mg_connection *c, struct mg_ws_mes
   json::parse_json(msg, [this, c, &msg](JsonObject root) -> bool {
     std::string type = root["type"] | "";
 
+    if (type == "diagnostics") {
+      this->ws_send(c, "diagnostics", json::build_json([&](JsonObject out) {
+        out["uptime_ms"] = millis();
+        out["tx_success"] = this->parent_->diagnostic_tx_success();
+        out["tx_fail"] = this->parent_->diagnostic_tx_fail();
+        out["rx_packets"] = this->parent_->diagnostic_rx_packets();
+        out["rx_drops"] = this->parent_->diagnostic_rx_drops();
+        out["fifo_overflows"] = this->parent_->diagnostic_fifo_overflows();
+        out["watchdog_recoveries"] = this->parent_->diagnostic_watchdog_recoveries();
+        size_t queued = 0;
+        JsonArray devices = out["devices"].to<JsonArray>();
+        if (auto *r = this->parent_->get_registry())
+          r->for_each_active([&](const Device &dev) {
+            queued += dev.sender.queue_size();
+            JsonObject item = devices.add<JsonObject>();
+            item["address"] = hex_str(dev.config.dst_address);
+            item["queued"] = dev.sender.queue_size();
+            item["current_tx_retries"] = dev.sender.current_tx_retries();
+            item["last_tx_ms"] = dev.sender.last_tx_ms();
+            item["last_check_queued_ms"] = dev.rf.last_check_queued_ms;
+            if (dev.rf.last_seen_ms) item["response_age_ms"] = millis() - dev.rf.last_seen_ms;
+          });
+        out["device_commands_queued"] = queued;
+      }));
+      return true;
+    }
+
     if (type == "cmd") {
       const char *address = root["address"];
       const char *action_str = root["action"];
@@ -441,6 +468,15 @@ void EleroWebServer::handle_ws_message(struct mg_connection *c, struct mg_ws_mes
       }
 
       this->dispatch_device_command_(*dev, cmd_byte);
+      return true;
+    }
+
+    if (type == "merge_alias") {
+      std::string error;
+      auto *registry = this->parent_->get_registry();
+      if (registry == nullptr || !registry->is_nvs_enabled()) error = "NVS registry unavailable";
+      else (void) registry->merge_cover_alias(parse_hex32(root, "canonical"), parse_hex32(root, "duplicate"), error);
+      if (!error.empty()) this->ws_send(c, "error", json::build_json([&](JsonObject out) { out["msg"] = error; }));
       return true;
     }
 
@@ -644,10 +680,13 @@ std::string EleroWebServer::build_rf_json(const RfPacketInfo &pkt) {
     root["command"] = hex_str8(pkt.command);
     root["state"] = hex_str8(pkt.state);
     root["cnt"] = pkt.cnt;
-    root["dir"] = "rx";
-    root["lqi"] = pkt.lqi;
-    root["crc"] = pkt.crc_ok;
-    root["rssi"] = round_rssi(pkt.rssi);
+    root["dir"] = pkt.is_tx ? "tx" : "rx";
+    if (pkt.is_tx) root["tx_success"] = pkt.tx_success;
+    else {
+      root["lqi"] = pkt.lqi;
+      root["crc"] = pkt.crc_ok;
+      root["rssi"] = round_rssi(pkt.rssi);
+    }
     root["hop"] = hex_str8(pkt.hop);
     root["raw"] = raw_hex;
   });
@@ -1163,7 +1202,7 @@ void EleroWebServer::handle_import_config_(struct mg_connection *c, JsonObject r
 
       bool was_existing = (registry->find(cfg.dst_address, cfg.type) != nullptr);
       if (registry->upsert(cfg) == nullptr) {
-        append_error(idx, "No free slot");
+        append_error(idx, "Invalid device, no free slot, or NVS write failed");
         ++skipped;
         continue;
       }

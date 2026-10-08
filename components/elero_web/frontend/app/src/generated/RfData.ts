@@ -2,6 +2,10 @@ import {RfDirection} from './RfDirection';
 interface RfData {
   'dir'?: RfDirection;
   /**
+   * Radio TX completion, not motor acknowledgement. TX only.
+   */
+  'tx_success'?: boolean;
+  /**
    * Received link quality, absent on older firmware
    */
   'lqi'?: number;

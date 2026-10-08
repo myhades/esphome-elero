@@ -44,12 +44,10 @@ Alternate `0x69` motor acceptance remains unverified.
 
 ## Remaining stages
 
-1. Versioned identity/profile persistence, explicit alias linking, validation,
-   migration, save/delete failure propagation and honest discovery lifecycle.
-2. Per-action command profiles, bidirectional tilt, STOP prioritization and
-   time-estimated fallback with provenance and stale-status suppression.
-3. Complete diagnostic TX/queue/error telemetry and sanitized bundles.
-4. User-assisted physical gates, fork-only PR review and release packaging.
+Autonomous implementation is split into the fork-only draft PRs documented below.
+Remaining deployment gates are physical validation, calibration, review, and a
+production release with the owner-approved configuration. No physical gate is
+satisfied by mocks, compilation, or CI artifacts.
 
 ## Rollback and physical gates
 
@@ -123,3 +121,47 @@ invented. Physical angle/STOP behavior still requires validation.
 
 Snapshot tests previously excluded by upstream now run through the registry test
 harness. Source rollback for this slice is `b2ce521`; the V4 schema is unchanged.
+
+## Complete diagnostic capture
+
+RX and radio TX completion are distinct rows. TX includes the actual built frame,
+counter and success/failure; it never counts as a received response. Channel
+broadcasts have destination zero, because they do not encode a motor destination.
+Copy and decoded re-send preserve captured destination/source/channel/framing;
+re-send creates fresh ciphertext/counter and still needs deliberate confirmation.
+
+Read-only gateway diagnostics report transmit success/failure, receive/drop counts,
+FIFO overflows, watchdog recovery and queued device commands. Log capture can be
+paused, filtered, copied with an HTTP fallback, or downloaded. Retry/backoff details
+remain in gateway logs and repeated TX rows rather than an invented motor-ACK count.
+
+A sanitized JSON bundle correlates pseudonymous addresses and includes numeric
+profiles/timings and radio counters. It intentionally omits raw frames, arbitrary
+logs, names and network configuration. Full RF/log exports are separate and should
+be reviewed before sharing. Firmware version includes a deterministic checksum of
+component source files. This identifies the source, not the physical board or motor.
+
+CI packages each compiled test firmware with its YAML, source SHA, dependency locks,
+tool versions and SHA256SUMS. These are review artifacts, not production pairing
+configuration or a release. Firmware binaries include normal compiler/build metadata;
+only the frontend asset is currently checked for byte-for-byte reproducibility.
+
+## Saved duplicate merge and final UI integration
+
+The Manage table uses the same provenance display as the detailed rows. Save
+states, Cancel, Dismiss and both tilt directions are wired into its actual action
+column and exercised in browser tests. Unsaved/draft profiles cannot accidentally
+send standard travel commands through the shortcut controls; saved STOP remains
+available. Explicit debug TX is separate and asks for confirmation.
+
+A saved duplicate can be explicitly merged from the canonical motor's settings.
+Remote/channel mismatch and existing conflicting aliases are rejected. Remove the
+duplicate from groups first. Canonical settings are retained; the alias is persisted
+before duplicate deletion. A failure of the second stage is reported as a partial
+merge and can be retried. This is not a power-fail atomic multi-record transaction.
+
+Read-only device diagnostics include current retry count, queue length, last radio
+completion, last CHECK enqueue and response age. Generic MOVING feedback following
+a known Raffstore tilt command is retained as raw evidence without starting a height
+travel estimate; a new full-travel command rearms height tracking. Actual motor
+behavior still needs observation.

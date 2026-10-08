@@ -76,6 +76,7 @@ class DeviceRegistry {
 
     /// Remove a saved group by id. Returns true if found and removed.
     bool remove_group(const char *id);
+    bool merge_cover_alias(uint32_t canonical, uint32_t duplicate, std::string &error);
 
     /// Find a saved group by id.
     [[nodiscard]] NvsGroupConfig *find_group(const char *id);

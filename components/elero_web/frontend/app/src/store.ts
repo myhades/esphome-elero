@@ -171,6 +171,9 @@ export const groups = signal<Map<string, GroupConfig>>(new Map())
 
 export const rfPackets = signal<RfPacketWithTimestamp[]>([])
 export const diagnosticLogs = signal<{ t: number; tag: string; level: number; msg: string }[]>([])
+export const deviceDiagnostics = signal<Record<string, unknown>[]>([])
+export const gatewayDiagnostics = signal<Record<string, number>>({})
+export const logCapturePaused = signal(false)
 export const websocketErrors = signal(0)
 export const capturePaused = signal(false)
 export const captureDropped = signal(0)
@@ -394,7 +397,7 @@ export function updateDevice(address: string, updates: Partial<Device>) {
 }
 
 export function addRfPacket(pkt: RfPacketWithTimestamp) {
-  const t = pkt.type?.toLowerCase()
+  const t = pkt.dir === 'tx' ? '' : pkt.type?.toLowerCase()
   const devs = devices.value
   let next: Map<string, Device> | null = null
 
@@ -440,7 +443,14 @@ export function addRfPacket(pkt: RfPacketWithTimestamp) {
       if (rfPackets.value.length >= CAPTURE_LIMIT) captureDropped.value++
       rfPackets.value = appendBounded(rfPackets.value, pkt)
     }
-    if (next) devices.value = next
+    if (next) {
+      // Cap ephemeral discovery independently from the RF ring; never evict saved devices or drafts.
+      if (next.size > 512) for (const [key, device] of next) {
+        if (next.size <= 512) break
+        if (device.updated_at === null && !device.save_state) next.delete(key)
+      }
+      devices.value = next
+    }
   })
 }
 

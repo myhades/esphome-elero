@@ -228,7 +228,7 @@ State on_tick(const State &state, uint32_t now, const Context &ctx) {
             // Full calibrated travel is conservative even when the start is unknown.
             // This settles the estimate only; it never fabricates an RF endpoint.
             const bool fallback = ctx.endpoint_margin_ms > 0 && has_position_tracking(ctx);
-            if (fallback && (now - s.start_ms) >= ctx.open_duration_ms + ctx.endpoint_margin_ms)
+            if (fallback && (now - s.start_ms) >= uint64_t{ctx.open_duration_ms} + ctx.endpoint_margin_ms)
                 return Idle{POSITION_OPEN, true, true};
             if (!fallback && (now - s.start_ms) >= ctx.movement_timeout_ms) {
                 float pos = position_during_opening(
@@ -242,7 +242,7 @@ State on_tick(const State &state, uint32_t now, const Context &ctx) {
             // Full calibrated travel is conservative even when the start is unknown.
             // This settles the estimate only; it never fabricates an RF endpoint.
             const bool fallback = ctx.endpoint_margin_ms > 0 && has_position_tracking(ctx);
-            if (fallback && (now - s.start_ms) >= ctx.close_duration_ms + ctx.endpoint_margin_ms)
+            if (fallback && (now - s.start_ms) >= uint64_t{ctx.close_duration_ms} + ctx.endpoint_margin_ms)
                 return Idle{POSITION_CLOSED, true, true};
             if (!fallback && (now - s.start_ms) >= ctx.movement_timeout_ms) {
                 float pos = position_during_closing(

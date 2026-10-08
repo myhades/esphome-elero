@@ -41,6 +41,8 @@ void Elero::loop() {
     } else {
       this->stat_tx_fail_++;
     }
+    if (this->registry_ != nullptr)
+      this->registry_->on_rf_packet(result.packet, result.packet.timestamp_ms);
     if (result.client != nullptr) {
       result.client->on_tx_complete(result.success);
     }
@@ -245,6 +247,7 @@ void Elero::rf_task_func_(void *arg) {
   auto *self = static_cast<Elero *>(arg);
   uint32_t last_stack_check_ms = 0;
   bool tx_in_progress = false;
+  EleroCommand diagnostic_command{};
 
   for (;;) {
     // If driver signaled unrecoverable failure, stop all radio operations.
@@ -259,7 +262,10 @@ void Elero::rf_task_func_(void *arg) {
     uint32_t now = millis();
 
     auto post_tx_done = [&](const TxResult &r) {
-      if (xQueueSend(self->tx_done_queue_handle_, &r, 0) != pdPASS) {
+      TxResult completed = r;
+      completed.packet = tx_diagnostic(diagnostic_command, self->msg_tx_,
+                                      self->msg_tx_[0] + 1, r.success, millis());
+      if (xQueueSend(self->tx_done_queue_handle_, &completed, 0) != pdPASS) {
         ESP_LOGE(TAG, "tx_done_queue full, dropping TX completion");
       }
     };
@@ -270,6 +276,7 @@ void Elero::rf_task_func_(void *arg) {
       if (xQueueReceive(self->tx_queue_handle_, &req, 0) == pdPASS) {
         switch (req.type) {
           case RfTaskRequest::Type::TX:
+            diagnostic_command = req.cmd;
             self->build_tx_packet_(req.cmd);
             if (self->driver_->load_and_transmit(self->msg_tx_, self->msg_tx_[0] + 1)) {
               self->tx_owner_ = req.client;
