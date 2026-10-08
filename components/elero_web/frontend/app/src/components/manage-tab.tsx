@@ -219,7 +219,7 @@ function SaveButton({ device }: { device: Device }) {
   if (!hub.value.crud) return null
   return <>
     {device.save_state && <span aria-label="Device save state" className="text-xs">{device.save_state}</span>}
-    {device.save_state && <Button variant="ghost" size="sm" onClick={() => cancelDeviceDraft(device.address)}>Cancel</Button>}
+    {device.save_state && <Button variant="ghost" size="sm" disabled={device.save_state === 'saving'} onClick={() => cancelDeviceDraft(device.address)}>Cancel</Button>}
     {device.updated_at === null && <Button variant="ghost" size="sm" onClick={() => dismissDiscovery(device.address)}>Dismiss</Button>}
     <Tooltip>
       <TooltipTrigger>

@@ -177,7 +177,7 @@ export function DeviceActions({ device, expanded, onToggleExpand }: {
   return (
     <div className="flex items-center gap-1">
       {device.save_state && <span className="text-xs">{device.save_state}</span>}
-      {device.save_state && <Button variant="ghost" onClick={() => cancelDeviceDraft(device.address)}>Cancel</Button>}
+      {device.save_state && <Button variant="ghost" disabled={device.save_state === 'saving'} onClick={() => cancelDeviceDraft(device.address)}>Cancel</Button>}
       {device.updated_at === null && <Button variant="ghost" onClick={() => dismissDiscovery(device.address)}>Dismiss</Button>}
       {hub.value.crud && (
         <Tooltip>
@@ -299,7 +299,7 @@ export function DeviceExpandedPanel({ device }: { device: Device }) {
         </label>
         <details className="sm:col-span-2"><summary>Advanced per-action encoding (UP, DOWN, STOP, tilt up, tilt down, preset, CHECK)</summary>
           <p>Numeric bytes. Enable only captured, validated overrides. Destination 0 selects command alias; 1 selects motor status source. 0x44 uses channel broadcasts without a motor destination or targeted payload prefix. 0x69 acceptance is unverified.</p>
-          <textarea className="h-40 w-full rounded border p-2 font-mono" defaultValue={JSON.stringify(device.actions, null, 2)} onChange={e => {
+          <textarea aria-label="Per-action encoding JSON" key={`${device.address}-${device.updated_at}-${device.save_state ? 'draft' : 'saved'}`} className="h-40 w-full rounded border p-2 font-mono" defaultValue={JSON.stringify(device.actions, null, 2)} onChange={e => {
             try {
               const value = JSON.parse(e.currentTarget.value)
               if (!Array.isArray(value) || value.length !== 7) throw new Error('Expected seven actions')
