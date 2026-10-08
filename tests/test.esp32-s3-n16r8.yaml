@@ -103,3 +103,10 @@ sensor:
       name: RF RX Drops
     last_rx_age:
       name: RF Last RX Age
+
+button:
+  - platform: template
+    name: "查询状态"
+    entity_category: diagnostic
+    on_press:
+      - lambda: id(raffstore).query_status();

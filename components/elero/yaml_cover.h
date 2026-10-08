@@ -35,6 +35,9 @@ class YamlCover final : public EspCoverShell, public OutputAdapter {
     return registry_->debug_send(*device_, command, type, type2, hop, destination,
                                  payload_1, payload_2, packets);
   }
+  void query_status() {
+    if (device_) registry_->request_check(*device_);
+  }
   void preset() {
     if (device_) registry_->command_cover_tilt(*device_);
   }

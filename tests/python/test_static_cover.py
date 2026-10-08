@@ -15,7 +15,7 @@ def test_complete_native_codegen(tmp_path):
     from pathlib import Path
     import yaml
     root = Path(__file__).resolve().parents[2]
-    config = yaml.safe_load((root / "tests/test.esp32-s3-n16r8.yaml").read_text())
+    config = yaml.safe_load((root / "tests/test.esp32-s3-n16r8.yaml").read_text(encoding="utf-8"))
     config["external_components"][0]["source"]["path"] = str(root / "components")
     config["esphome"]["build_path"] = str(tmp_path / "build")
     device = config["cover"][0]
@@ -25,7 +25,7 @@ def test_complete_native_codegen(tmp_path):
     result = subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)],
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
-    source = (tmp_path / "build/src/main.cpp").read_text()
+    source = (tmp_path / "build/src/main.cpp").read_text(encoding="utf-8")
     assert source.count("App.register_cover(") == 1
     assert "cfg.open_duration_ms = 27000" in source
     assert "cfg.close_duration_ms = 29000" in source
@@ -38,5 +38,6 @@ def test_complete_native_codegen(tmp_path):
     assert "elero_web" not in source
     assert "TiltStepButton(raffstore, true)" in source
     assert "TiltStepButton(raffstore, false)" in source
-    assert source.count("App.register_button(") == 2
+    assert source.count("App.register_button(") == 3
     assert "debug_send(command, frame_type, type2, hop" in source
+    assert "raffstore->query_status();" in source
