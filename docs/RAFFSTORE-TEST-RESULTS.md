@@ -66,7 +66,7 @@ They are compile-test artifacts, not the owner's ready-to-flash configuration.
 | Build + initial diagnostics | [0449ca3](https://github.com/myhades/esphome-elero/commit/0449ca3), [PR 1](https://github.com/myhades/esphome-elero/pull/1) | `ui_assets.py`, frontend diagnostics/export, backend debug TX, CI, N16R8 fixture | `baseline/manuschillerdev-dev` |
 | Identity + profiles + V4 | [b2ce521](https://github.com/myhades/esphome-elero/commit/b2ce521), [PR 2](https://github.com/myhades/esphome-elero/pull/2) | `nvs_config.h`, `command_sender.h`, `device_registry.cpp`, Web schema/store/settings, tests | `0449ca3` |
 | Estimated state + tilt | [b5d7252](https://github.com/myhades/esphome-elero/commit/b5d7252), [PR 3](https://github.com/myhades/esphome-elero/pull/3) | `cover_sm.*`, `state_snapshot.*`, native/MQTT adapters, controls, snapshot tests | `b2ce521` |
-| Diagnostics + end-to-end integration | `feat/raffstore-diagnostic-bundles` | `elero.*` TX telemetry, Manage table, log/bundle export, explicit alias merge, CI artifacts, browser tests | `b5d7252` |
+| Diagnostics + end-to-end integration | [7aa1d0e](https://github.com/myhades/esphome-elero/commit/7aa1d0e), [PR 4](https://github.com/myhades/esphome-elero/pull/4) | `elero.*` TX telemetry, Manage table, log/bundle export, explicit alias merge, CI artifacts, browser tests | `b5d7252` |
 
 The complete candidate is the last stacked branch. Earlier drafts are engineering
 slices and include integration gaps fixed by the final slice. All branches and PRs

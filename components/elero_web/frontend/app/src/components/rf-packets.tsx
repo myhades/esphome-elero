@@ -37,6 +37,13 @@ export function RfPackets() {
       <h2 className="text-sm font-semibold">RF Diagnostics</h2>
       <p className="text-xs">Firmware source: {hub.value.version || 'unknown'}. TX completed means the radio finished; it does not confirm motor execution.</p>
       <p className="text-xs">{rfPackets.value.length}/{CAPTURE_LIMIT} retained; {captureDropped.value} overwritten. Capture {capturePaused.value ? 'paused' : 'running'}.</p>
+      <details className="text-xs leading-relaxed">
+        <summary>Help: identity, calibration and useful captures</summary>
+        <p>The motor status source is the stable cover identity. Its command destination can be a different address. Link the alias explicitly in Manage; match the paired remote and control channel. A STATUS header channel is not a replacement for that control channel.</p>
+        <p>Open/close durations are measured full-travel times in seconds. Both must be positive for position control. A zero duration disables tracking; an endpoint margin of zero disables calibrated settling. With calibration and a margin, missing terminal feedback settles an estimated endpoint after full travel plus that margin. This does not prove TOP/BOTTOM is absent on your motor.</p>
+        <p>RF state is the last received report. HA state and position can be estimated; the provenance label and transition reason explain this. Unknown startup height stays unknown. Raffstore tilt controls are directional steps, not measured angles. Native HA trait/configuration changes require a gateway reboot after saving.</p>
+        <p>For a useful report: clear the capture, note the physical start/stop times and direction, observe the original remote, then pause and export. Refresh gateway diagnostics to include queue/retry counters. Keep full RF JSON privately for byte-level analysis; use the sanitized bundle for sharing. Hub → Backup &amp; Restore exports saved settings before an update.</p>
+      </details>
       <p className="text-xs">Header CH in STATUS is not the configured control channel. Missing fields mean unavailable. Decoded captures are not proof of motor acknowledgement.</p>
       <div className="flex flex-wrap items-center gap-2 text-xs [&_button]:rounded-md [&_button]:border [&_button]:px-3 [&_button]:py-2 [&_button]:hover:bg-accent [&_button]:disabled:opacity-40">
         <input className="h-8 rounded-md border bg-background px-2" aria-label="Filter capture" placeholder="Address, type, state or timestamp" value={query.value} onInput={e => { query.value = e.currentTarget.value }} />
