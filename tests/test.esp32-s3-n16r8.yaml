@@ -75,22 +75,17 @@ cover:
     open_duration: 55s
     close_duration: 55s
     endpoint_margin: 2s
-    tilt: true
     # Restore original frame families; long-travel motor acceptance still needs testing.
     commands:
       up: {command: 0x21, type: 0x44, type2: 0x10, hop: 0x00}
       down: {command: 0x41, type: 0x44, type2: 0x10, hop: 0x00}
       stop: {command: 0x10, type: 0x6A, destination: status}
-      tilt_up: {command: 0x20, type: 0x44, type2: 0x10, hop: 0x00}
-      tilt_down: {command: 0x40, type: 0x44, type2: 0x10, hop: 0x00}
-      preset: {command: 0x24, type: 0x44, type2: 0x10, hop: 0x00}
       check: {command: 0x00, type: 0x6A, destination: status}
-    rssi:
-      name: RF RSSI
-    status:
-      name: RF Status and Position Source
 
 sensor:
+  - platform: elero
+    cover_id: raffstore
+    name: RF RSSI
   - platform: elero
     elero_id: radio
     tx_success:
@@ -105,8 +100,16 @@ sensor:
       name: RF Last RX Age
 
 button:
-  - platform: template
+  - platform: elero
+    cover_id: raffstore
     name: "查询状态"
-    entity_category: diagnostic
-    on_press:
-      - lambda: id(raffstore).query_status();
+
+text_sensor:
+  - platform: elero
+    cover_id: raffstore
+    rf_state:
+      name: RF State
+    position_source:
+      name: Position Source
+    transition_reason:
+      name: Transition Reason

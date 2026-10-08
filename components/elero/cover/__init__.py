@@ -1,16 +1,14 @@
 """Static native cover, with explicit RF actions and honest state provenance."""
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import button, cover, sensor, text_sensor
+from esphome.components import cover
 from esphome.const import CONF_ID
 
 from .. import CONF_REGISTRY_ID, DeviceRegistry, OutputAdapter, elero_ns
 
 DEPENDENCIES = ["elero"]
-AUTO_LOAD = ["sensor", "text_sensor", "button"]
 YamlCover = elero_ns.class_("YamlCover", cover.Cover, cg.Component, OutputAdapter)
-TiltStepButton = elero_ns.class_("TiltStepButton", button.Button)
-ACTIONS = ("up", "down", "stop", "tilt_up", "tilt_down", "preset", "check")
+ACTIONS = {"up": 0, "down": 1, "stop": 2, "tilt_up": 3, "tilt_down": 4, "check": 6}
 ADDRESS = cv.hex_int_range(min=1, max=0xFFFFFF)
 DURATION = cv.All(cv.positive_time_period_milliseconds, cv.Range(max=cv.TimePeriod(milliseconds=120000)))
 def action_header_defaults(config):
@@ -37,20 +35,12 @@ def validate_timing(config):
         raise cv.Invalid("Set both travel durations, or leave both at 0s")
     if config["state_strategy"] == "timed" and not (opening and closing):
         raise cv.Invalid("timed state strategy requires calibrated open_duration and close_duration")
+    if config["tilt"] and not all(k in config["commands"] for k in ("tilt_up", "tilt_down")):
+        raise cv.Invalid("tilt: true requires commands.tilt_up and commands.tilt_down")
     return config
 
 
-def add_tilt_buttons(config):
-    config = dict(config)
-    if cv.boolean(config.get("tilt", True)):
-        for direction in ("up", "down"):
-            config.setdefault(f"tilt_{direction}_button", {
-                "name": f"{config.get('name', 'Raffstore')} Tilt {direction.title()} Step",
-            })
-    return config
-
-
-CONFIG_SCHEMA = cv.All(add_tilt_buttons, cover.cover_schema(YamlCover).extend({
+CONFIG_SCHEMA = cv.All(cover.cover_schema(YamlCover).extend({
     cv.GenerateID(CONF_REGISTRY_ID): cv.use_id(DeviceRegistry),
     cv.Required("status_address"): ADDRESS,
     cv.Required("remote_address"): ADDRESS,
@@ -62,12 +52,11 @@ CONFIG_SCHEMA = cv.All(add_tilt_buttons, cover.cover_schema(YamlCover).extend({
     cv.Optional("endpoint_margin", default="2s"): cv.All(
         cv.positive_time_period_milliseconds,
         cv.Range(min=cv.TimePeriod(milliseconds=1), max=cv.TimePeriod(milliseconds=30000))),
-    cv.Optional("tilt", default=True): cv.boolean,
-    cv.Optional("tilt_up_button"): button.button_schema(TiltStepButton),
-    cv.Optional("tilt_down_button"): button.button_schema(TiltStepButton),
-    cv.Required("commands"): cv.Schema({cv.Required(action): ACTION_SCHEMA for action in ACTIONS}),
-    cv.Optional("rssi"): sensor.sensor_schema(unit_of_measurement="dBm", accuracy_decimals=0, entity_category="diagnostic"),
-    cv.Optional("status"): text_sensor.text_sensor_schema(entity_category="diagnostic"),
+    cv.Optional("tilt", default=False): cv.boolean,
+    cv.Required("commands"): cv.Schema({
+        **{cv.Required(action): ACTION_SCHEMA for action in ("up", "down", "stop", "check")},
+        **{cv.Optional(action): ACTION_SCHEMA for action in ("tilt_up", "tilt_down")},
+    }),
 }).extend(cv.COMPONENT_SCHEMA), validate_timing)
 
 
@@ -103,17 +92,11 @@ async def to_code(config):
     }
     body = "elero::NvsDeviceConfig cfg; "
     body += " ".join(f"cfg.{key} = {int(value)};" for key, value in fields.items())
-    for index, action in enumerate(ACTIONS):
+    for action, index in ACTIONS.items():
+        if action not in config["commands"]:
+            continue
         values = dict(config["commands"][action], enabled=1)
         values["destination"] = int(values["destination"] == "status")
         body += " " + " ".join(f"cfg.actions[{index}].{key} = {int(value)};" for key, value in values.items())
     body += " return cfg;"
     cg.add(var.set_config(cg.RawExpression(f"[]() {{ {body} }}()")))
-    if "rssi" in config:
-        cg.add(var.set_rssi_sensor(await sensor.new_sensor(config["rssi"])))
-    if "status" in config:
-        cg.add(var.set_status_sensor(await text_sensor.new_text_sensor(config["status"])))
-
-    if config["tilt"]:
-        await button.new_button(config["tilt_up_button"], var, True)
-        await button.new_button(config["tilt_down_button"], var, False)

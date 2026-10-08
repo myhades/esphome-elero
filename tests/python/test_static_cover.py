@@ -36,8 +36,11 @@ def test_complete_native_codegen(tmp_path):
     assert "register_light" not in source
     assert "mongoose" not in source
     assert "elero_web" not in source
-    assert "TiltStepButton(raffstore, true)" in source
-    assert "TiltStepButton(raffstore, false)" in source
-    assert source.count("App.register_button(") == 3
+    assert "TiltStepButton(" not in source
+    assert source.count("App.register_button(") == 1
+    assert "set_refresh_button(" in source
+    assert "set_rssi_sensor(" in source
+    assert "set_position_source_sensor(" in source
+    assert "cfg.supports_tilt = 0" in source
+    assert "cfg.actions[5].enabled = 1" not in source
     assert "debug_send(command, frame_type, type2, hop" in source
-    assert "raffstore->query_status();" in source

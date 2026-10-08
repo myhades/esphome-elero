@@ -3,6 +3,7 @@ import esphome.config_validation as cv
 from esphome.components import sensor
 
 from .. import elero
+from ..cover import YamlCover
 
 DEPENDENCIES = ["elero"]
 STATS = {
@@ -12,7 +13,7 @@ STATS = {
     "rx_drops": "set_stats_rx_drops_sensor",
     "last_rx_age": "set_stats_last_rx_age_sensor",
 }
-CONFIG_SCHEMA = cv.Schema({
+STATS_SCHEMA = cv.Schema({
     cv.GenerateID("elero_id"): cv.use_id(elero),
     **{cv.Optional(key): sensor.sensor_schema(
         accuracy_decimals=0, entity_category="diagnostic",
@@ -20,7 +21,17 @@ CONFIG_SCHEMA = cv.Schema({
     ) for key in STATS},
 })
 
+RSSI_SCHEMA = sensor.sensor_schema(
+    unit_of_measurement="dBm", accuracy_decimals=0, icon="mdi:wifi",
+    device_class="signal_strength", state_class="measurement", entity_category="diagnostic",
+).extend({cv.Required("cover_id"): cv.use_id(YamlCover)})
+CONFIG_SCHEMA = cv.Any(RSSI_SCHEMA, STATS_SCHEMA)
+
 async def to_code(config):
+    if "cover_id" in config:
+        cover = await cg.get_variable(config["cover_id"])
+        cg.add(cover.set_rssi_sensor(await sensor.new_sensor(config)))
+        return
     hub = await cg.get_variable(config["elero_id"])
     for key, setter in STATS.items():
         if key in config:

@@ -1,0 +1,16 @@
+# Home Assistant configuration, NOT ESPHome YAML.
+# Replace source entity IDs below with the actual IDs in your HA instance.
+template:
+  - sensor:
+      - name: Curtain RF Diagnostics
+        unique_id: curtain_rf_diagnostics
+        icon: mdi:wifi
+        unit_of_measurement: dBm
+        device_class: signal_strength
+        state_class: measurement
+        availability: "{{ is_number(states('sensor.dev_esp_wohnung_rf_rssi')) }}"
+        state: "{{ states('sensor.dev_esp_wohnung_rf_rssi') }}"
+        attributes:
+          rf_state: "{{ states('sensor.dev_esp_wohnung_rf_state') }}"
+          position_source: "{{ states('sensor.dev_esp_wohnung_position_source') }}"
+          transition_reason: "{{ states('sensor.dev_esp_wohnung_transition_reason') }}"

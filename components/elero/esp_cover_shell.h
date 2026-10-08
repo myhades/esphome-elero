@@ -45,7 +45,9 @@ class EspCoverShell : public cover::Cover, public Component {
   void set_rssi_sensor(sensor::Sensor *s) { rssi_sensor_ = s; }
 #endif
 #ifdef USE_TEXT_SENSOR
-  void set_status_sensor(text_sensor::TextSensor *s) { status_sensor_ = s; }
+  void set_rf_state_sensor(text_sensor::TextSensor *s) { rf_state_sensor_ = s; }
+  void set_position_source_sensor(text_sensor::TextSensor *s) { position_source_sensor_ = s; }
+  void set_transition_reason_sensor(text_sensor::TextSensor *s) { transition_reason_sensor_ = s; }
   void set_problem_type_sensor(text_sensor::TextSensor *s) { problem_type_sensor_ = s; }
 #endif
 #ifdef USE_BINARY_SENSOR
@@ -159,13 +161,9 @@ class EspCoverShell : public cover::Cover, public Component {
       rssi_sensor_->publish_state(static_cast<float>(pub.rssi_rounded));
 #endif
 #ifdef USE_TEXT_SENSOR
-    if ((changes & (state_change::STATE_STRING | state_change::POSITION)) && status_sensor_ != nullptr) {
-      char status[192];
-      snprintf(status, sizeof(status), "%s; position=%s; reason=%s%s", pub.state_string,
-               pub.position_source, pub.transition_reason,
-               pub.position_known ? "" : "; native_position=50% placeholder");
-      status_sensor_->publish_state(status);
-    }
+    if (rf_state_sensor_) rf_state_sensor_->publish_state(pub.state_string);
+    if (position_source_sensor_) position_source_sensor_->publish_state(pub.position_source);
+    if (transition_reason_sensor_) transition_reason_sensor_->publish_state(pub.transition_reason);
     if ((changes & state_change::PROBLEM) && problem_type_sensor_ != nullptr)
       problem_type_sensor_->publish_state(pub.problem_type);
 #endif
@@ -182,7 +180,9 @@ class EspCoverShell : public cover::Cover, public Component {
   sensor::Sensor *rssi_sensor_{nullptr};
 #endif
 #ifdef USE_TEXT_SENSOR
-  text_sensor::TextSensor *status_sensor_{nullptr};
+  text_sensor::TextSensor *rf_state_sensor_{nullptr};
+  text_sensor::TextSensor *position_source_sensor_{nullptr};
+  text_sensor::TextSensor *transition_reason_sensor_{nullptr};
   text_sensor::TextSensor *problem_type_sensor_{nullptr};
 #endif
 #ifdef USE_BINARY_SENSOR

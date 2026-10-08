@@ -38,9 +38,6 @@ class YamlCover final : public EspCoverShell, public OutputAdapter {
   void query_status() {
     if (device_) registry_->request_check(*device_);
   }
-  void preset() {
-    if (device_) registry_->command_cover_tilt(*device_);
-  }
  private:
   NvsDeviceConfig config_{};
 };
