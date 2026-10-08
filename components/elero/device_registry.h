@@ -128,6 +128,11 @@ class DeviceRegistry {
     /// Enqueues a single CHECK packet — blind responds with current state.
     void request_check(Device &dev);
 
+    // One explicitly requested diagnostic burst; uses the device sender/counter.
+    // Does not change YAML/NVS configuration or infer motor movement from TX.
+    bool debug_send(Device &dev, int command, int type, int type2, int hop,
+                    int destination, int payload_1, int payload_2, int packets);
+
     // ═════════════════════════════════════════════════════════════════════════
     // RF DISPATCH
     // ═════════════════════════════════════════════════════════════════════════

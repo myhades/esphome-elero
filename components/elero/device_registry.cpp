@@ -70,6 +70,40 @@ bool DeviceRegistry::enqueue_or_warn_(Device &dev, uint8_t cmd_byte,
     return false;
 }
 
+bool DeviceRegistry::debug_send(Device &dev, int command, int type, int type2, int hop,
+                                int destination, int payload_1, int payload_2, int packets) {
+    const auto byte = [](int value) { return value >= 0 && value <= 255; };
+    if (!dev.active || !dev.is_cover() || !dev.config.is_enabled() ||
+        !byte(command) || !byte(type2) || !byte(hop) || !byte(payload_1) || !byte(payload_2) ||
+        (type != 0x44 && type != 0x69 && type != 0x6a) ||
+        destination < 1 || destination > 0xFFFFFF || packets < 1 || packets > 3) {
+        ESP_LOGW("elero.debug", "Rejected invalid RF parameters (bytes 0..255, type 44/69/6a, address 1..ffffff, packets 1..3)");
+        return false;
+    }
+    // STOP may cancel pending logical work. Other probes must not accumulate.
+    if (command == packet::command::STOP) dev.sender.clear_queue();
+    else if (dev.sender.is_busy()) {
+        ESP_LOGW("elero.debug", "Rejected: device sender busy; wait for completion");
+        return false;
+    }
+    EleroCommand encoding{};
+    encoding.src_addr = dev.config.src_address;
+    encoding.dst_addr = static_cast<uint32_t>(destination);
+    encoding.channel = dev.config.channel;
+    encoding.type = static_cast<uint8_t>(type);
+    encoding.type2 = static_cast<uint8_t>(type2);
+    encoding.hop = static_cast<uint8_t>(hop);
+    encoding.payload[0] = static_cast<uint8_t>(payload_1);
+    encoding.payload[1] = static_cast<uint8_t>(payload_2);
+    encoding.payload[4] = static_cast<uint8_t>(command);
+    if (!dev.sender.enqueue_encoded(encoding, static_cast<uint8_t>(packets))) return false;
+    // Allow a response window without immediately adding an automatic CHECK.
+    std::get<CoverDevice>(dev.logic).poll.on_command_sent(millis());
+    ESP_LOGI("elero.debug", "Queued diagnostic burst cmd=0x%02x type=0x%02x packets=%d; configuration unchanged, motor acceptance unknown",
+             command, type, packets);
+    return true;
+}
+
 bool DeviceRegistry::enqueue_check_(Device &dev, const char *context) {
     bool queued = enqueue_or_warn_(dev, packet::command::CHECK,
                                    packet::limits::CHECK_PACKETS,

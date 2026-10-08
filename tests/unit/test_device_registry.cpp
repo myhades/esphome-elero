@@ -1436,3 +1436,51 @@ TEST_F(DeviceRegistryTest, YamlModeObservesConfiguredRemoteWithoutDiscoveringEnt
     registry_.on_rf_packet(pkt, 2000);
     EXPECT_EQ(registry_.count_active(), 1u);
 }
+
+TEST_F(DeviceRegistryTest, DebugBurstPreservesConfigCounterAndState) {
+    mock_time_.advance(100);
+    auto cfg = make_cover_config(0x300001);
+    auto *dev = registry_.upsert(cfg);
+    ASSERT_NE(dev, nullptr);
+    const auto saved = dev->config;
+    dev->sender.command().counter = 37;
+    auto &cover = std::get<CoverDevice>(dev->logic);
+    ASSERT_TRUE(registry_.debug_send(*dev, 0x41, 0x44, 0x10, 0, 0x200001, 2, 4, 3));
+    EXPECT_EQ(dev->sender.queue_size(), 1u);
+    EXPECT_FALSE(registry_.debug_send(*dev, 0x10, 0x69, 0, 10, 0, 0, 4, 3));
+    EXPECT_EQ(dev->sender.queue_size(), 1u);  // Invalid STOP must not clear queued work.
+    EXPECT_TRUE(std::holds_alternative<cover_sm::Idle>(cover.state));
+    registry_.loop(esphome::millis());
+    const auto &tx = dev->sender.command();
+    EXPECT_EQ(tx.counter, 37);
+    EXPECT_EQ(tx.src_addr, cfg.src_address);
+    EXPECT_EQ(tx.dst_addr, 0x200001u);
+    EXPECT_EQ(tx.channel, cfg.channel);
+    EXPECT_EQ(tx.payload[4], 0x41);
+    EXPECT_EQ(tx.type, 0x44);
+    EXPECT_EQ(tx.type2, 0x10);
+    EXPECT_EQ(tx.hop, 0);
+    EXPECT_EQ(tx.payload[0], 2);
+    EXPECT_EQ(std::memcmp(&saved, &dev->config, sizeof(saved)), 0);
+    EXPECT_FALSE(registry_.debug_send(*dev, 0x21, 0x69, 0, 10, 0x200001, 0, 4, 1));
+    // STOP remains available while diagnostic work is pending.
+    EXPECT_TRUE(registry_.debug_send(*dev, 0x10, 0x6a, 0, 10, 0x300001, 0, 4, 3));
+    EXPECT_EQ(dev->sender.queue_size(), 1u);
+}
+
+TEST_F(DeviceRegistryTest, DebugRejectsInvalidArgumentsBeforeNarrowingOrQueueMutation) {
+    auto *dev = registry_.upsert(make_cover_config(0x300001));
+    ASSERT_NE(dev, nullptr);
+    EXPECT_FALSE(registry_.debug_send(*dev, 256, 0x44, 16, 0, 0x200001, 0, 4, 3));
+    EXPECT_FALSE(registry_.debug_send(*dev, -1, 0x44, 16, 0, 0x200001, 0, 4, 3));
+    EXPECT_FALSE(registry_.debug_send(*dev, 0x10, 0xca, 0, 10, 0x200001, 0, 4, 3));
+    EXPECT_FALSE(registry_.debug_send(*dev, 0x10, 0x69, 256, 10, 0x200001, 0, 4, 3));
+    EXPECT_FALSE(registry_.debug_send(*dev, 0x10, 0x69, 0, -1, 0x200001, 0, 4, 3));
+    EXPECT_FALSE(registry_.debug_send(*dev, 0x10, 0x69, 0, 10, 0, 0, 4, 3));
+    EXPECT_FALSE(registry_.debug_send(*dev, 0x10, 0x69, 0, 10, 0x1000000, 0, 4, 3));
+    EXPECT_FALSE(registry_.debug_send(*dev, 0x10, 0x69, 0, 10, 0x200001, -1, 4, 3));
+    EXPECT_FALSE(registry_.debug_send(*dev, 0x10, 0x69, 0, 10, 0x200001, 0, 256, 3));
+    EXPECT_FALSE(registry_.debug_send(*dev, 0x10, 0x69, 0, 10, 0x200001, 0, 4, 0));
+    EXPECT_FALSE(registry_.debug_send(*dev, 0x10, 0x69, 0, 10, 0x200001, 0, 4, 4));
+    EXPECT_EQ(dev->sender.queue_size(), 0u);
+}

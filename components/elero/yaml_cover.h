@@ -26,6 +26,15 @@ class YamlCover final : public EspCoverShell, public OutputAdapter {
   void tilt_step(bool up) {
     if (device_) registry_->command_cover_tilt_step(*device_, up);
   }
+  bool debug_send(int command, int type, int type2, int hop, int destination,
+                  int payload_1, int payload_2, int packets) {
+    if (!device_ || !registry_) {
+      ESP_LOGW("elero.debug", "Rejected: YAML cover not bound");
+      return false;
+    }
+    return registry_->debug_send(*device_, command, type, type2, hop, destination,
+                                 payload_1, payload_2, packets);
+  }
   void preset() {
     if (device_) registry_->command_cover_tilt(*device_);
   }

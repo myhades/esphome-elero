@@ -12,15 +12,21 @@ YamlCover = elero_ns.class_("YamlCover", cover.Cover, cg.Component, OutputAdapte
 ACTIONS = ("up", "down", "stop", "tilt_up", "tilt_down", "preset", "check")
 ADDRESS = cv.hex_int_range(min=1, max=0xFFFFFF)
 DURATION = cv.All(cv.positive_time_period_milliseconds, cv.Range(max=cv.TimePeriod(milliseconds=120000)))
-ACTION_SCHEMA = cv.Schema({
+def action_header_defaults(config):
+    config.setdefault("type2", 0x10 if config["type"] == 0x44 else 0)
+    config.setdefault("hop", 0 if config["type"] == 0x44 else 0x0A)
+    return config
+
+
+ACTION_SCHEMA = cv.All(cv.Schema({
     cv.Required("command"): cv.hex_uint8_t,
-    cv.Optional("type", default=0x69): cv.All(cv.hex_uint8_t, cv.one_of(0x44, 0x69, 0x6A)),
-    cv.Optional("type2", default=0): cv.hex_uint8_t,
-    cv.Optional("hop", default=0x0A): cv.hex_uint8_t,
+    cv.Required("type"): cv.All(cv.hex_uint8_t, cv.one_of(0x44, 0x69, 0x6A)),
+    cv.Optional("type2"): cv.hex_uint8_t,
+    cv.Optional("hop"): cv.hex_uint8_t,
     cv.Optional("payload_1", default=0): cv.hex_uint8_t,
     cv.Optional("payload_2", default=4): cv.hex_uint8_t,
     cv.Optional("destination", default="command"): cv.one_of("command", "status"),
-})
+}), action_header_defaults)
 
 
 def validate_timing(config):

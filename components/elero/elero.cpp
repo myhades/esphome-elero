@@ -41,7 +41,7 @@ void Elero::loop() {
     } else {
       this->stat_tx_fail_++;
     }
-    ESP_LOGV(TAG_RF, "TX_RESULT t=%lu success=%u raw=%s",
+    ESP_LOGD(TAG_RF, "TX_RESULT t=%lu success=%u raw=%s",
              static_cast<unsigned long>(result.packet.timestamp_ms), result.success,
              format_hex_pretty(result.packet.raw, result.packet.raw_len).c_str());
     if (this->registry_ != nullptr)
@@ -441,8 +441,10 @@ void Elero::build_tx_packet_(const EleroCommand &cmd) {
 
 bool Elero::request_tx(TxClient *client, const EleroCommand &cmd) {
 #ifdef USE_ESP32
-  ESP_LOGV(TAG_RF, "TX dst=0x%06x src=0x%06x cmd=0x%02x type=0x%02x cnt=%u",
-           cmd.dst_addr, cmd.src_addr, cmd.payload[4], cmd.type, cmd.counter);
+  ESP_LOGD(TAG_RF, "TX_REQUEST dst=0x%06lx src=0x%06lx ch=%u cmd=0x%02x type=0x%02x type2=0x%02x hop=0x%02x p1=0x%02x p2=0x%02x cnt=%u",
+           static_cast<unsigned long>(cmd.dst_addr), static_cast<unsigned long>(cmd.src_addr),
+           cmd.channel, cmd.payload[4], cmd.type, cmd.type2, cmd.hop,
+           cmd.payload[0], cmd.payload[1], cmd.counter);
 
   // Post to RF task queue (non-blocking, no SPI)
   RfTaskRequest req{};
@@ -510,7 +512,7 @@ void Elero::dispatch_packet(const RfPacketInfo &pkt) {
   const int64_t dispatch_start_us = esp_timer_get_time();
 #endif
 
-  ESP_LOGV(TAG_RF, "RX src=0x%06x dst=0x%06x type=0x%02x cmd=0x%02x state=0x%02x cnt=%u",
+  ESP_LOGD(TAG_RF, "RX src=0x%06x dst=0x%06x type=0x%02x cmd=0x%02x state=0x%02x cnt=%u",
            pkt.src, pkt.dst, pkt.type, pkt.command, pkt.state, pkt.cnt);
 
   ESP_LOGV(TAG_RF, "RX_META t=%lu ch=%u type2=0x%02x hop=0x%02x rssi=%.1f crc=%u raw=%s",

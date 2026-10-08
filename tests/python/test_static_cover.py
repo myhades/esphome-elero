@@ -16,6 +16,8 @@ def test_valid_address(address):
 def test_explicit_framing(frame_type):
     config = ACTION_SCHEMA({"command": 0x21, "type": frame_type})
     assert config["type"] == frame_type
+    assert config["type2"] == (0x10 if frame_type == 0x44 else 0)
+    assert config["hop"] == (0 if frame_type == 0x44 else 0x0A)
     assert config["payload_2"] == 4
     assert config["destination"] == "command"
 
@@ -25,7 +27,7 @@ def test_explicit_framing(frame_type):
 ])
 def test_invalid_action(config):
     with pytest.raises(Invalid):
-        ACTION_SCHEMA(config)
+        ACTION_SCHEMA({"type": 0x69, **config})
 
 @pytest.mark.parametrize("opening,closing,strategy,valid", [
     (0, 0, "feedback", True), (0, 0, "timed", False),
@@ -97,3 +99,15 @@ def test_complete_native_codegen(tmp_path):
     assert "register_light" not in source
     assert "mongoose" not in source
     assert "elero_web" not in source
+    assert "debug_send(command, frame_type, type2, hop" in source
+
+
+def test_rf_type_must_be_explicit():
+    with pytest.raises(Invalid):
+        ACTION_SCHEMA({"command": 0x21})
+
+
+def test_explicit_headers_are_preserved():
+    config = ACTION_SCHEMA({"command": 0x21, "type": 0x44, "type2": 7, "hop": 8})
+    assert config["type2"] == 7
+    assert config["hop"] == 8

@@ -25,6 +25,21 @@ wifi:
   password: !secret wifi_password
 
 api:
+  actions:
+    - action: elero_rf_debug
+      variables:
+        command: int
+        frame_type: int
+        type2: int
+        hop: int
+        destination: int
+        payload_1: int
+        payload_2: int
+        packets: int
+      then:
+        - lambda: |-
+            id(raffstore).debug_send(command, frame_type, type2, hop,
+                                    destination, payload_1, payload_2, packets);
   encryption:
     key: !secret api_encryption_key
 
@@ -64,14 +79,14 @@ cover:
     close_duration: 0s
     endpoint_margin: 2s
     tilt: true
-    # 0x69 reflects observed remote framing; hardware acceptance is unverified.
+    # Restore original frame families; long-travel motor acceptance still needs testing.
     commands:
-      up: {command: 0x21, type: 0x69}
-      down: {command: 0x41, type: 0x69}
-      stop: {command: 0x10, type: 0x69}
-      tilt_up: {command: 0x20, type: 0x69}
-      tilt_down: {command: 0x40, type: 0x69}
-      preset: {command: 0x24, type: 0x69}
+      up: {command: 0x21, type: 0x44, type2: 0x10, hop: 0x00}
+      down: {command: 0x41, type: 0x44, type2: 0x10, hop: 0x00}
+      stop: {command: 0x10, type: 0x6A, destination: status}
+      tilt_up: {command: 0x20, type: 0x44, type2: 0x10, hop: 0x00}
+      tilt_down: {command: 0x40, type: 0x44, type2: 0x10, hop: 0x00}
+      preset: {command: 0x24, type: 0x44, type2: 0x10, hop: 0x00}
       check: {command: 0x00, type: 0x6A, destination: status}
     rssi:
       name: RF RSSI
