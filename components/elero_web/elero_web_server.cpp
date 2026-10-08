@@ -269,6 +269,8 @@ void EleroWebServer::on_state_changed(const Device &dev, uint16_t /*changes*/) {
 // RF Packet Handler
 // ═══════════════════════════════════════════════════════════════════════════════
 
+static void write_profile(const NvsDeviceConfig &cfg, JsonObject out);
+
 void EleroWebServer::on_rf_packet(const RfPacketInfo &pkt) {
   if (this->ws_clients_.empty() || !this->enabled_)
     return;
@@ -563,6 +565,7 @@ std::string EleroWebServer::build_config_json() {
         obj["name"] = dev.config.name;
         obj["channel"] = dev.config.channel;
         obj["remote"] = hex_str(dev.config.src_address);
+        write_profile(dev.config, obj);
         obj["open_ms"] = dev.config.open_duration_ms;
         obj["close_ms"] = dev.config.close_duration_ms;
         obj["supports_tilt"] = dev.config.supports_tilt != 0;
@@ -659,6 +662,7 @@ std::string EleroWebServer::build_device_upserted_json_(const Device &dev) {
       root["remote"] = hex_str(dev.config.src_address);
     }
     if (dev.config.is_cover()) {
+      write_profile(dev.config, root);
       root["open_ms"] = dev.config.open_duration_ms;
       root["close_ms"] = dev.config.close_duration_ms;
       root["supports_tilt"] = dev.config.supports_tilt != 0;
@@ -721,6 +725,24 @@ void EleroWebServer::dispatch_device_command_(Device &dev, uint8_t cmd_byte) {
   ESP_LOGI(TAG, "Device TX to 0x%06x cmd=0x%02x", dev.config.dst_address, cmd_byte);
 }
 
+static void write_profile(const NvsDeviceConfig &cfg, JsonObject out) {
+  out["command_address"] = hex_str(cfg.command_destination());
+  out["command_profile"] = cfg.command_profile;
+  out["endpoint_margin_ms"] = cfg.endpoint_margin_ms;
+  JsonArray actions = out["actions"].to<JsonArray>();
+  for (const auto &action : cfg.actions) {
+    JsonObject item = actions.add<JsonObject>();
+    item["enabled"] = action.enabled != 0;
+    item["command"] = action.command;
+    item["type"] = action.type;
+    item["type2"] = action.type2;
+    item["hop"] = action.hop;
+    item["payload_1"] = action.payload_1;
+    item["payload_2"] = action.payload_2;
+    item["destination"] = action.destination;
+  }
+}
+
 bool EleroWebServer::parse_device_config_(JsonObject root, NvsDeviceConfig &config, std::string &error) {
   if (!parse_device_type(root["device_type"] | "", config.type)) {
     error = "Invalid device_type";
@@ -758,6 +780,42 @@ bool EleroWebServer::parse_device_config_(JsonObject root, NvsDeviceConfig &conf
 
     if (config.is_cover()) {
       config.supports_tilt = (root["supports_tilt"] | false) ? 1 : 0;
+      config.command_address = parse_hex32(root, "command_address");
+      if ((!root["command_profile"].isNull() && (!root["command_profile"].is<unsigned>() || root["command_profile"].as<unsigned>() > 1)) ||
+          (!root["endpoint_margin_ms"].isNull() && !root["endpoint_margin_ms"].is<uint32_t>())) {
+        error = "Invalid profile or endpoint margin";
+        return false;
+      }
+      config.command_profile = root["command_profile"] | 0;
+      config.endpoint_margin_ms = root["endpoint_margin_ms"] | 0U;
+      if (config.command_profile > 1 || config.command_address > 0xFFFFFF || config.endpoint_margin_ms > 30000) {
+        error = "Invalid command profile, RF alias or endpoint margin (max 30000 ms)";
+        return false;
+      }
+      if (!root["actions"].isNull()) {
+        JsonArray actions = root["actions"].as<JsonArray>();
+        if (actions.isNull() || actions.size() != static_cast<size_t>(CoverAction::COUNT)) {
+          error = "actions must contain seven action configurations";
+          return false;
+        }
+        size_t i = 0;
+        for (JsonObject item : actions) {
+          for (const char *key : {"command", "type", "type2", "hop", "payload_1", "payload_2", "destination"}) {
+            if (!item[key].is<unsigned>() || item[key].as<unsigned>() > 255) {
+              error = "Action fields must be numeric bytes";
+              return false;
+            }
+          }
+          auto &action = config.actions[i++];
+          action = {static_cast<uint8_t>(item["enabled"] | false), item["command"].as<uint8_t>(),
+                    item["type"].as<uint8_t>(), item["type2"].as<uint8_t>(), item["hop"].as<uint8_t>(),
+                    item["payload_1"].as<uint8_t>(), item["payload_2"].as<uint8_t>(), item["destination"].as<uint8_t>()};
+          if (action.destination > 1 || (action.type != 0x44 && action.type != 0x69 && action.type != 0x6a)) {
+            error = "Invalid action destination or TX packet type";
+            return false;
+          }
+        }
+      }
     }
     if (config.is_light()) {
       if (root["dim_duration_ms"].is<uint32_t>()) config.dim_duration_ms = root["dim_duration_ms"].as<uint32_t>();
@@ -945,7 +1003,7 @@ void EleroWebServer::handle_group_command_(struct mg_connection *c, JsonObject r
 // Bump in lockstep with the `snapshot_version` const in
 // frontend/app/asyncapi.yaml (`ConfigSnapshot.snapshot_version`).
 // A drift makes every import fail with "Unsupported snapshot_version".
-constexpr uint8_t SNAPSHOT_VERSION = 2;
+constexpr uint8_t SNAPSHOT_VERSION = 3;
 
 void EleroWebServer::build_device_snapshot_(const NvsDeviceConfig &cfg, JsonObject out) {
   out["device_type"] = device_type_str(cfg.type);
@@ -963,6 +1021,7 @@ void EleroWebServer::build_device_snapshot_(const NvsDeviceConfig &cfg, JsonObje
     out["type2"] = hex_str8(cfg.type2);
   }
   if (cfg.is_cover()) {
+    write_profile(cfg, out);
     out["open_duration_ms"] = cfg.open_duration_ms;
     out["close_duration_ms"] = cfg.close_duration_ms;
     out["supports_tilt"] = cfg.supports_tilt != 0;

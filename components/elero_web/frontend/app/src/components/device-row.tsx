@@ -1,3 +1,4 @@
+import { useSignal } from '@preact/signals'
 import { Button } from './ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent } from './ui/tooltip'
 import { InlineEdit } from './ui/inline-edit'
@@ -6,7 +7,7 @@ import { formatTime } from './packet-table'
 import { ChevronUp, Square, ChevronDown, Shrink, Lightbulb, LightbulbOff, Settings, RotateCcw, Save, Info, Trash2 } from './icons'
 import { cn } from '@/lib/utils'
 import {
-  updateDevice, getStateLabel, getCommandLabel, isCommandPacket, isButtonPacket,
+  updateDevice, cancelDeviceDraft, dismissDiscovery, getStateLabel, getCommandLabel, isCommandPacket, isButtonPacket,
   rfPackets, hub, displayNames,
   type Device, type RfPacketWithTimestamp,
 } from '@/store'
@@ -15,8 +16,8 @@ import { sendDeviceCommand, sendRawCommand, sendUpsertDevice, sendRemoveDevice }
 // ─── Shared cell renderers (used by DataTable column definitions) ───────────
 
 export function StatusDot({ device }: { device: Device }) {
-  const unsaved = device.updated_at === null
-  const label = unsaved ? 'Unsaved' : device.enabled ? 'Saved & published' : 'Saved & unpublished'
+  const unsaved = device.updated_at === null || !!device.save_state
+  const label = device.save_state ?? (device.updated_at === null ? 'Discovered (not saved)' : hub.value.mode === 'native' ? 'Saved; HA changes require reboot' : 'Saved')
   const dot = unsaved ? (
     <span className="relative flex size-2 shrink-0">
       <span className="absolute inline-flex size-full animate-ping rounded-full bg-orange-400 opacity-75" />
@@ -169,11 +170,14 @@ export function DeviceActions({ device, expanded, onToggleExpand }: {
 }) {
   return (
     <div className="flex items-center gap-1">
+      {device.save_state && <span className="text-xs">{device.save_state}</span>}
+      {device.save_state && <Button variant="ghost" onClick={() => cancelDeviceDraft(device.address)}>Cancel</Button>}
+      {device.updated_at === null && <Button variant="ghost" onClick={() => dismissDiscovery(device.address)}>Dismiss</Button>}
       {hub.value.crud && (
         <Tooltip>
           <TooltipTrigger>
             <Button variant="ghost" size="icon" className="size-7 text-primary hover:text-primary"
-              onClick={() => sendUpsertDevice(device)}>
+              aria-label="Save device" disabled={device.save_state === 'saving'} onClick={() => sendUpsertDevice(device)}>
               <Save className="size-3.5" />
             </Button>
           </TooltipTrigger>
@@ -249,6 +253,7 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
 
 export function DeviceExpandedPanel({ device }: { device: Device }) {
   const crudEnabled = hub.value.crud
+  const actionError = useSignal('')
   const packets = rfPackets.value
 
   const commandPackets = deduplicatePackets(
@@ -261,6 +266,42 @@ export function DeviceExpandedPanel({ device }: { device: Device }) {
 
   return (
     <div className="border-t border-border bg-muted/20">
+      {device.type === 'cover' && <div className="grid gap-3 border-b p-5 text-xs sm:grid-cols-2">
+        <label>Motor status source (canonical)
+          <input className="block w-full rounded border p-2" aria-label="Motor status source" value={device.status_address || device.address}
+            disabled={device.updated_at !== null}
+            onInput={e => updateDevice(device.address, { status_address: e.currentTarget.value })} />
+        </label>
+        <label>Command destination alias
+          <input className="block w-full rounded border p-2" aria-label="Command destination alias" value={device.command_address || device.address}
+            onInput={e => updateDevice(device.address, { command_address: e.currentTarget.value })} />
+        </label>
+        <label>Command profile
+          <select className="block rounded border p-2" value={device.command_profile} onChange={e => updateDevice(device.address, { command_profile: Number(e.currentTarget.value) })}>
+            <option value={0}>Standard roller shutter</option><option value={1}>Raffstore (hardware validation required)</option>
+          </select>
+        </label>
+        <label>Endpoint estimate margin (ms; 0 disables)
+          <input className="block rounded border p-2" type="number" min={0} max={30000} value={device.endpoint_margin_ms} onInput={e => updateDevice(device.address, { endpoint_margin_ms: Number(e.currentTarget.value) })} />
+        </label>
+        <label>Paired remote source
+          <input className="block rounded border p-2" value={device.remote} onInput={e => updateDevice(device.address, { remote: e.currentTarget.value })} />
+        </label>
+        <label>Control channel
+          <input className="block rounded border p-2" type="number" min={0} max={255} value={device.channel} onInput={e => updateDevice(device.address, { channel: Number(e.currentTarget.value) })} />
+        </label>
+        <details className="sm:col-span-2"><summary>Advanced per-action encoding (UP, DOWN, STOP, tilt up, tilt down, preset, CHECK)</summary>
+          <p>Numeric bytes. Enable only captured, validated overrides. Destination 0 selects command alias; 1 selects motor status source. 0x69 acceptance is unverified.</p>
+          <textarea className="h-40 w-full rounded border p-2 font-mono" defaultValue={JSON.stringify(device.actions, null, 2)} onChange={e => {
+            try {
+              const value = JSON.parse(e.currentTarget.value)
+              if (!Array.isArray(value) || value.length !== 7) throw new Error('Expected seven actions')
+              updateDevice(device.address, { actions: value }); actionError.value = ''
+            } catch (error) { actionError.value = String(error) }
+          }} /><p role="alert">{actionError.value}</p>
+        </details>
+        <p className="sm:col-span-2">Save explicitly. A linked alias suppresses provisional duplicates. Native Home Assistant registration requires reboot after saving. Editing the canonical address is only available for provisional devices.</p>
+      </div>}
       {/* Config row */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-border">
         {/* Left: config inputs */}

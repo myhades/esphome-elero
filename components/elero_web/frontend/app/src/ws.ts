@@ -4,7 +4,7 @@ import {
   setConnected, setDevices, addRfPacket,
   onDeviceUpserted, onDeviceRemoved, onStateChanged, onHubConfig,
   onConfigSnapshot, onImportResult, onLearnInState, onGroupUpserted, onGroupRemoved,
-  devices, showToast, diagnosticLogs, websocketErrors,
+  devices, showToast, diagnosticLogs, websocketErrors, markSaving, failPendingSaves,
   type Device,
 } from './store'
 
@@ -31,6 +31,7 @@ export function initWs() {
 
   socket.onclose = () => {
     setConnected(false)
+    failPendingSaves()
     if (ws === socket) {
       ws = null
       reconnectTimer = setTimeout(initWs, 2000)
@@ -81,6 +82,7 @@ export function initWs() {
     } else if (event === 'learn_in_state') {
       onLearnInState(data as LearnInStateData)
     } else if (event === 'error') {
+      failPendingSaves()
       showToast('error', (data as ErrorData).msg)
     }
   }
@@ -109,10 +111,20 @@ export function sendDeviceCommand(
 }
 
 export function sendUpsertDevice(device: Device) {
+  const validAddress = (value: string) => /^0x[0-9a-f]{1,6}$/i.test(value) && parseInt(value, 16) > 0
+  if (!validAddress(device.status_address || device.address) || !validAddress(device.command_address || device.address) ||
+      (device.type !== 'remote' && (!validAddress(device.remote) || !Number.isInteger(device.channel) || device.channel < 0 || device.channel > 255))) {
+    showToast('error', 'Enter valid 24-bit hex addresses and a control channel from 0 to 255.'); return
+  }
+  if (ws?.readyState === WebSocket.OPEN) markSaving(device.address)
   const payload: UpsertDevicePayload = {
     type: 'upsert_device',
     device_type: device.type,
-    dst_address: device.address,
+    dst_address: device.status_address || device.address,
+    command_address: device.command_address || device.address,
+    command_profile: device.command_profile,
+    endpoint_margin_ms: device.endpoint_margin_ms,
+    ...(device.actions.length ? { actions: device.actions } : {}),
     src_address: device.remote,
     channel: device.channel,
     name: device.name,

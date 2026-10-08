@@ -74,3 +74,32 @@ mock tests cannot satisfy those gates.
 可暂停抓包、筛选地址、复制记录、下载 JSON/JSONL/CSV。HTTP 环境不能自动复制时，
 请在显示的文本框内全选复制。发送按钮仅说明命令进入队列，不代表电机已执行。
 更新前请备份现有固件、配置和 NVS；实际 STOP、倾斜和终点反馈仍需之后人工验证。
+
+## Identity/profile slice
+
+V4 stores 132-byte records under `elero_device_v4` preference keys. On first
+boot it reads the unchanged 64-byte V3 records under `elero_device`, fills default
+standard profiles, and writes V4. Old keys remain intact. A V4 tombstone prevents
+deleted records being migrated again. Rolling back to V3 restores the pre-migration
+configuration; later edits require restoring a compatible backup. Export JSON
+snapshot version 3 includes aliases and seven per-action encoding overrides.
+
+`dst_address` remains the canonical motor status source and HA identity.
+`command_address` defaults to that address. Explicitly linked remote source,
+control channel and destination match incoming commands without merging unrelated
+motors. STATUS header CH never edits the configured control channel.
+
+Profile 0 keeps standard travel bytes. Profile 1 uses long travel 0x21/0x41;
+STOP remains 0x10, tilt step bytes are 0x20/0x40, preset 0x24, CHECK 0x00.
+Framing defaults remain 0x44 for motion and 0x6a for STOP/CHECK. No automatic
+0x69 switch is made. Enabled per-action overrides can select framing, payload,
+hop and canonical/alias destination. CHECK defaults to the canonical status source.
+Mixed-profile groups dispatch through individual device profiles.
+
+Save failures now return errors before publishing config changes. Delete writes
+its tombstone before removing the live device. Browser drafts retain their saved
+identity, expose saving/failed/dirty status and can be cancelled. Dismissed
+provisional discoveries are remembered in browser storage (per gateway), with an
+explicit reset; they are not synchronized to other browsers or NVS.
+
+Hardware migration, STOP acceptance and all alternate framing remain unverified.

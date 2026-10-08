@@ -1,3 +1,4 @@
+import {RfActionConfig} from './RfActionConfig';
 import {DeviceType} from './DeviceType';
 /**
  * Full device config returned by the server after a successful upsert.
@@ -6,6 +7,13 @@ import {DeviceType} from './DeviceType';
  * lights include dim_ms, remotes have only address/device_type/name.
  */
 interface DeviceUpsertedData {
+  /**
+   * Command destination alias; canonical address is the motor status source
+   */
+  'command_address'?: string;
+  'command_profile'?: number;
+  'endpoint_margin_ms'?: number;
+  'actions'?: RfActionConfig[];
   /**
    * 3-byte device address (hex string)
    * @example 0xa831e5

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 #include "device_type.h"
 #include "elero_packet.h"
 
@@ -10,7 +11,7 @@ namespace esphome {
 namespace elero {
 
 /// NVS config version — bump when struct layout changes (v3: added updated_at)
-constexpr uint8_t NVS_CONFIG_VERSION = 3;
+constexpr uint8_t NVS_CONFIG_VERSION = 4;
 
 /// NVS group config version — separate compound objects, not device slots.
 constexpr uint8_t NVS_GROUP_CONFIG_VERSION = 1;
@@ -39,9 +40,9 @@ inline constexpr const char *GROUP = "elero_group";
 /// Fixed-size device configuration persisted via ESPHome preferences.
 /// Each pre-allocated slot stores its own config independently.
 /// Layout is stable — bump NVS_CONFIG_VERSION when changing fields.
-struct NvsDeviceConfig {
+struct NvsDeviceConfigV3 {
   // Header (4 bytes)
-  uint8_t version{NVS_CONFIG_VERSION};
+  uint8_t version{3};
   DeviceType type{DeviceType::COVER};
   static constexpr uint8_t FLAG_ENABLED = 0x01;
   uint8_t flags{FLAG_ENABLED};  ///< bit 0 = enabled
@@ -76,7 +77,7 @@ struct NvsDeviceConfig {
   bool is_enabled() const { return flags & FLAG_ENABLED; }
   void set_enabled(bool en) { en ? (flags |= FLAG_ENABLED) : (flags &= ~FLAG_ENABLED); }
 
-  bool is_valid() const { return version == NVS_CONFIG_VERSION && dst_address != 0; }
+  bool is_valid() const { return version == 3 && dst_address != 0; }
   bool is_cover() const { return type == DeviceType::COVER; }
   bool is_light() const { return type == DeviceType::LIGHT; }
   bool is_remote() const { return type == DeviceType::REMOTE; }
@@ -91,7 +92,46 @@ struct NvsDeviceConfig {
   }
 };
 
-static_assert(sizeof(NvsDeviceConfig) == 64, "NvsDeviceConfig must be 64 bytes for NVS storage");
+static_assert(sizeof(NvsDeviceConfigV3) == 64, "Legacy NVS layout must remain 64 bytes");
+
+enum class CoverAction : uint8_t { UP, DOWN, STOP, TILT_UP, TILT_DOWN, PRESET, CHECK, COUNT };
+
+/// Explicit per-action override. Disabled entries use the selected profile.
+struct RfActionConfig {
+  uint8_t enabled{0};
+  uint8_t command{0};
+  uint8_t type{packet::msg_type::COMMAND};
+  uint8_t type2{packet::defaults::TYPE2};
+  uint8_t hop{packet::defaults::HOP};
+  uint8_t payload_1{packet::defaults::PAYLOAD_1};
+  uint8_t payload_2{packet::defaults::PAYLOAD_2};
+  uint8_t destination{0};  ///< 0 = command alias, 1 = canonical status address
+};
+
+/// V4 is stored under a new preference key; V3 bytes remain available for rollback.
+struct NvsDeviceConfig : NvsDeviceConfigV3 {
+  uint32_t command_address{0};  ///< 0 = use dst_address (the canonical status source)
+  uint32_t endpoint_margin_ms{0};  ///< 0 disables the timed endpoint fallback
+  uint8_t command_profile{0};  ///< 0 = standard, 1 = Raffstore (framing still configurable)
+  uint8_t reserved_v4[3]{};
+  RfActionConfig actions[static_cast<size_t>(CoverAction::COUNT)]{};
+
+  NvsDeviceConfig() { version = NVS_CONFIG_VERSION; }
+  bool is_valid() const {
+    return version == NVS_CONFIG_VERSION && dst_address > 0 && dst_address <= 0xFFFFFF &&
+           command_address <= 0xFFFFFF && src_address <= 0xFFFFFF && command_profile <= 1;
+  }
+  uint32_t command_destination() const { return command_address ? command_address : dst_address; }
+};
+static_assert(sizeof(NvsDeviceConfig) == 132, "V4 NVS layout changed");
+static_assert(std::is_trivially_copyable_v<NvsDeviceConfig>);
+
+inline NvsDeviceConfig migrate_v3(const NvsDeviceConfigV3 &legacy) {
+  NvsDeviceConfig result{};
+  static_cast<NvsDeviceConfigV3 &>(result) = legacy;
+  result.version = NVS_CONFIG_VERSION;
+  return result;
+}
 
 /// Fixed-size group configuration persisted via ESPHome preferences.
 /// Groups are pure membership metadata: id + display name + stable device ids.

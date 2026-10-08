@@ -5,7 +5,7 @@ import type {
   StateChangedData, FreqConfig, HubMode, HubConfig, HubConfigEventData, RadioConfig,
   BlindConfig, LightConfig, RemoteConfig, GroupConfig as WireGroupConfig, GroupRemovedData,
   RfStateName,
-  ConfigSnapshot, ImportResult, LearnInStateData,
+  ConfigSnapshot, ImportResult, LearnInStateData, RfActionConfig,
 } from '@/generated'
 
 // Re-export generated types used by components
@@ -126,6 +126,12 @@ export interface DevicePairing {
 
 export interface Device {
   address: string
+  save_state?: 'dirty' | 'saving' | 'failed'
+  status_address?: string
+  command_address: string
+  command_profile: number
+  endpoint_margin_ms: number
+  actions: RfActionConfig[]
   type: DeviceType
   updated_at: number | null  // non-null = saved (server-confirmed), null = unsaved
   enabled: boolean
@@ -230,6 +236,7 @@ function mergePairings(...sources: Array<DevicePairing[] | undefined>): DevicePa
 
 function makeDevice(partial: Partial<Device> & { address: string; type: DeviceType }): Device {
   return {
+    command_address: '', command_profile: 0, endpoint_margin_ms: 0, actions: [],
     updated_at: null,
     enabled: true,
     channel: 0,
@@ -247,6 +254,7 @@ function makeDevice(partial: Partial<Device> & { address: string; type: DeviceTy
 
 function blindToDevice(b: BlindConfig): Device {
   return makeDevice({
+    command_address: b.command_address ?? b.address, command_profile: b.command_profile ?? 0, endpoint_margin_ms: b.endpoint_margin_ms ?? 0, actions: b.actions ?? [],
     address: b.address, type: 'cover', updated_at: b.updated_at || null, enabled: b.enabled,
     name: b.name, channel: b.channel, remote: b.remote, pairings: makePairings(b.remote, b.channel),
     open_ms: b.open_ms, close_ms: b.close_ms, supports_tilt: b.supports_tilt,
@@ -283,27 +291,37 @@ export function setConnected(val: boolean) {
 }
 
 export function setDevices(data: ConfigData) {
-  const next = new Map(devices.value)
+  if (data.hub.device !== hub.value.device) {
+    dismissed.clear()
+    try {
+      const saved = JSON.parse(localStorage.getItem(`elero-dismissed-${data.hub.device}`) || '[]')
+      if (Array.isArray(saved)) for (const address of saved.slice(-512)) if (typeof address === 'string') dismissed.add(address)
+    } catch { /* optional browser persistence */ }
+  }
+  const previous = devices.value
+  const next = new Map([...previous].filter(([, d]) => d.updated_at === null || d.save_state))
   for (const b of data.blinds) {
     const device = blindToDevice(b)
-    const existing = next.get(b.address)
+    const existing = previous.get(b.address)
+    if (existing?.save_state) continue
     next.set(b.address, {
       ...existing,
       ...device,
-      remote: existing?.remote || device.remote,
-      channel: existing?.remote ? existing.channel : device.channel,
+      remote: device.remote,
+      channel: device.channel,
       pairings: mergePairings(existing?.pairings, device.pairings),
       lastStatus: existing?.lastStatus ?? device.lastStatus,
     })
   }
   for (const l of data.lights) {
     const device = lightToDevice(l)
-    const existing = next.get(l.address)
+    const existing = previous.get(l.address)
+    if (existing?.save_state) continue
     next.set(l.address, {
       ...existing,
       ...device,
-      remote: existing?.remote || device.remote,
-      channel: existing?.remote ? existing.channel : device.channel,
+      remote: device.remote,
+      channel: device.channel,
       pairings: mergePairings(existing?.pairings, device.pairings),
       lastStatus: existing?.lastStatus ?? device.lastStatus,
     })
@@ -320,6 +338,10 @@ export function setDevices(data: ConfigData) {
   for (const l of data.lights) {
     if (!next.has(l.remote)) next.set(l.remote, makeDevice({ address: l.remote, type: 'remote' }))
   }
+  for (const device of next.values()) {
+    const provisional = next.get(device.command_address)
+    if (device.updated_at !== null && device.command_address !== device.address && provisional?.updated_at === null && !provisional.save_state) next.delete(device.command_address)
+  }
   batch(() => {
     devices.value = next
     groups.value = new Map((data.groups ?? []).map((group) => [group.id, groupToApp(group)]))
@@ -329,11 +351,41 @@ export function setDevices(data: ConfigData) {
   })
 }
 
+const originalDrafts = new Map<string, Device>()
+export function cancelDeviceDraft(address: string) {
+  const original = originalDrafts.get(address)
+  if (!original) return
+  devices.value = new Map(devices.value).set(address, original)
+  originalDrafts.delete(address)
+}
+export function markSaving(address: string) {
+  const device = devices.value.get(address)
+  if (device) devices.value = new Map(devices.value).set(address, { ...device, save_state: 'saving' })
+}
+export function failPendingSaves() {
+  devices.value = new Map([...devices.value].map(([key, device]) => [key, device.save_state === 'saving' ? { ...device, save_state: 'failed' } : device]))
+}
+const dismissed = new Set<string>()
+export function dismissDiscovery(address: string) {
+  const device = devices.value.get(address)
+  if (!device || device.updated_at !== null) return
+  dismissed.add(address)
+  if (dismissed.size > 512) dismissed.delete(dismissed.values().next().value!)
+  try { localStorage.setItem(`elero-dismissed-${hub.value.device}`, JSON.stringify([...dismissed])) }
+  catch { showToast('error', 'Dismissed for this session; browser storage unavailable.') }
+  const next = new Map(devices.value); next.delete(address); devices.value = next
+}
+export function resetDismissedDiscoveries() {
+  dismissed.clear()
+  try { localStorage.removeItem(`elero-dismissed-${hub.value.device}`) } catch { /* session reset still succeeds */ }
+}
+
 export function updateDevice(address: string, updates: Partial<Device>) {
   const d = devices.value.get(address)
   if (!d) return
   const next = new Map(devices.value)
-  const updated = { ...d, updated_at: null, ...updates }
+  if (!originalDrafts.has(address)) originalDrafts.set(address, d)
+  const updated: Device = { ...d, save_state: 'dirty', ...updates }
   if ('remote' in updates || 'channel' in updates) {
     updated.pairings = mergePairings(d.pairings, makePairings(updated.remote, updated.channel))
   }
@@ -352,12 +404,15 @@ export function addRfPacket(pkt: RfPacketWithTimestamp) {
   }
 
   if (t === msg_type.COMMAND || t === msg_type.COMMAND_ALT) {
-    const target = (next ?? devs).get(pkt.dst)
+    const targets = [...(next ?? devs).values()].filter(d =>
+      d.type !== 'remote' && d.updated_at !== null &&
+      (d.command_address || d.address) === pkt.dst && d.remote === pkt.src && d.channel === pkt.channel)
+    const target = targets[0] ?? (next ?? devs).get(pkt.dst)
     const pairing = makePairings(pkt.src, pkt.channel)
-    if (!target) {
+    if (!target && !dismissed.has(pkt.dst)) {
       mut().set(pkt.dst, makeDevice({ address: pkt.dst, type: 'cover', remote: pkt.src, channel: pkt.channel, pairings: pairing }))
-    } else if (target.type !== 'remote') {
-      mut().set(pkt.dst, {
+    } else if (target && target.type !== 'remote') {
+      mut().set(target.address, {
         ...target,
         remote: target.remote || pkt.src,
         channel: target.remote ? target.channel : pkt.channel,
@@ -395,10 +450,12 @@ export function clearRfPackets() {
 }
 
 export function onDeviceUpserted(data: DeviceUpsertedData) {
+  originalDrafts.delete(data.address)
   const existing = devices.value.get(data.address)
   const next = new Map(devices.value)
 
   const device = makeDevice({
+    command_address: data.command_address ?? data.address, command_profile: data.command_profile ?? 0, endpoint_margin_ms: data.endpoint_margin_ms ?? 0, actions: data.actions ?? [],
     address: data.address,
     type: data.device_type,
     updated_at: data.updated_at || null,
@@ -419,6 +476,10 @@ export function onDeviceUpserted(data: DeviceUpsertedData) {
     pairings: mergePairings(existing?.pairings, device.pairings),
   })
 
+  if (device.command_address !== device.address) {
+    const provisional = next.get(device.command_address)
+    if (provisional?.updated_at === null) next.delete(device.command_address)
+  }
   // Ensure remote entry exists for non-remote devices
   if (data.device_type !== 'remote' && data.remote && !next.has(data.remote)) {
     next.set(data.remote, makeDevice({ address: data.remote, type: 'remote' }))

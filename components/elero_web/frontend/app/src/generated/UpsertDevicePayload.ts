@@ -1,3 +1,4 @@
+import {RfActionConfig} from './RfActionConfig';
 import {DeviceType} from './DeviceType';
 /**
  * Create or update a device in NVS. The combination of `dst_address` + `device_type`
@@ -5,6 +6,13 @@ import {DeviceType} from './DeviceType';
  * Only available when `crud` is `true` in the config event.
  */
 interface UpsertDevicePayload {
+  /**
+   * Command destination alias; canonical address is the motor status source
+   */
+  'command_address'?: string;
+  'command_profile'?: number;
+  'endpoint_margin_ms'?: number;
+  'actions'?: RfActionConfig[];
   'type': 'upsert_device';
   /**
    * Type of device (cover, light, or remote control)

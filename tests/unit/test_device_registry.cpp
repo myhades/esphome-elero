@@ -231,6 +231,8 @@ class DeviceRegistryTest : public ::testing::Test {
     Elero hub_;
 
     void SetUp() override {
+        esphome::preference_data.clear();
+        esphome::preference_save_fails = false;
         set_time_provider(&mock_time_);
         mock_time_.reset();
         registry_.set_hub(&hub_);
@@ -1152,4 +1154,109 @@ TEST_F(DeviceRegistryTest, HubName_HasOverrideReflectsState) {
 
     registry_.set_hub_name_override("");
     EXPECT_FALSE(registry_.has_hub_name_override());
+}
+
+TEST_F(DeviceRegistryTest, FailedSaveDoesNotPublishOrMutate) {
+    registry_.set_nvs_enabled(true);
+    registry_.init_preferences();
+    auto cfg = make_cover_config(0x300001);
+    auto *dev = registry_.upsert(cfg);
+    ASSERT_NE(dev, nullptr);
+    adapter_.clear();
+    esphome::preference_save_fails = true;
+    cfg.set_name("Must not persist");
+    EXPECT_EQ(registry_.upsert(cfg), nullptr);
+    EXPECT_STREQ(dev->config.name, "Test Cover");
+    EXPECT_TRUE(adapter_.config_changed.empty());
+    EXPECT_FALSE(registry_.remove(cfg.dst_address, DeviceType::COVER));
+    EXPECT_TRUE(dev->active);
+    EXPECT_TRUE(adapter_.removed.empty());
+}
+
+TEST_F(DeviceRegistryTest, V3MigrationPreservesOriginalAndV4DeletionSurvivesReboot) {
+    auto legacy = static_cast<NvsDeviceConfigV3>(make_cover_config(0x300001));
+    legacy.version = 3;
+    legacy.updated_at = 123;
+    auto old_pref = esphome::global_preferences->make_preference<NvsDeviceConfigV3>(esphome::fnv1_hash("elero_device"));
+    ASSERT_TRUE(old_pref.save(&legacy));
+    registry_.set_nvs_enabled(true);
+    registry_.restore_all();
+    auto *dev = registry_.find(legacy.dst_address);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(dev->config.version, 4);
+    EXPECT_EQ(dev->config.command_destination(), legacy.dst_address);
+    EXPECT_EQ(dev->config.command_profile, 0);
+    EXPECT_EQ(dev->config.open_duration_ms, legacy.open_duration_ms);
+    NvsDeviceConfigV3 preserved{};
+    ASSERT_TRUE(old_pref.load(&preserved));
+    EXPECT_EQ(std::memcmp(&legacy, &preserved, sizeof(legacy)), 0);
+    ASSERT_TRUE(registry_.remove(legacy.dst_address, DeviceType::COVER));
+    DeviceRegistry rebooted;
+    rebooted.set_nvs_enabled(true);
+    rebooted.restore_all();
+    EXPECT_EQ(rebooted.find(legacy.dst_address), nullptr);
+}
+
+TEST_F(DeviceRegistryTest, V4IdentityAndActionOverridesSurviveReboot) {
+    registry_.set_nvs_enabled(true);
+    registry_.init_preferences();
+    auto cfg = make_cover_config(0x300001);
+    cfg.command_address = 0x200001;
+    cfg.command_profile = 1;
+    cfg.endpoint_margin_ms = 2000;
+    cfg.actions[0] = {1, 0x21, 0x69, 0x10, 0x0a, 0, 3, 0};
+    ASSERT_NE(registry_.upsert(cfg), nullptr);
+    DeviceRegistry rebooted;
+    rebooted.set_nvs_enabled(true);
+    rebooted.restore_all();
+    auto *dev = rebooted.find(cfg.dst_address);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(dev->config.command_address, 0x200001);
+    EXPECT_EQ(dev->config.actions[0].type, 0x69);
+    EXPECT_EQ(dev->config.actions[0].payload_2, 3);
+    EXPECT_EQ(dev->config.endpoint_margin_ms, 2000);
+}
+
+TEST_F(DeviceRegistryTest, RaffstoreProfileIsPerDeviceAndFramingIsExplicit) {
+    auto standard = make_cover_config(0x300001);
+    EXPECT_EQ(cover_encoding(standard, CoverAction::UP).payload[4], 0x20);
+    EXPECT_EQ(cover_encoding(standard, CoverAction::DOWN).payload[4], 0x40);
+    auto cfg = standard;
+    cfg.command_address = 0x200001;
+    cfg.command_profile = 1;
+    EXPECT_EQ(cover_encoding(cfg, CoverAction::UP).payload[4], 0x21);
+    EXPECT_EQ(cover_encoding(cfg, CoverAction::DOWN).payload[4], 0x41);
+    EXPECT_EQ(cover_encoding(cfg, CoverAction::TILT_UP).payload[4], 0x20);
+    EXPECT_EQ(cover_encoding(cfg, CoverAction::TILT_DOWN).payload[4], 0x40);
+    EXPECT_EQ(cover_encoding(cfg, CoverAction::STOP).payload[4], 0x10);
+    EXPECT_EQ(cover_encoding(cfg, CoverAction::STOP).dst_addr, 0x200001);
+    EXPECT_EQ(cover_encoding(cfg, CoverAction::CHECK).dst_addr, 0x300001);
+    cfg.actions[2] = {1, 0x10, 0x69, 0x10, 0x09, 0, 3, 1};
+    auto stop = cover_encoding(cfg, CoverAction::STOP);
+    EXPECT_EQ(stop.type, 0x69);
+    EXPECT_EQ(stop.type2, 0x10);
+    EXPECT_EQ(stop.hop, 0x09);
+    EXPECT_EQ(stop.payload[1], 3);
+    EXPECT_EQ(stop.dst_addr, 0x300001);
+    EXPECT_EQ(cover_encoding(standard, CoverAction::UP).payload[4], 0x20);
+}
+
+TEST_F(DeviceRegistryTest, RemoteAliasCommandsUpdateOnlyExplicitlyLinkedMotor) {
+    auto cfg = make_cover_config(0x300001);
+    cfg.command_address = 0x200001;
+    cfg.command_profile = 1;
+    auto *dev = registry_.upsert(cfg);
+    ASSERT_NE(dev, nullptr);
+    RfPacketInfo packet{};
+    packet.type = 0x69; packet.src = cfg.src_address; packet.dst = cfg.command_address;
+    packet.channel = cfg.channel; packet.command = 0x21;
+    registry_.on_rf_packet(packet, 1000);
+    EXPECT_EQ(cover_sm::operation(std::get<CoverDevice>(dev->logic).state), cover_sm::Operation::OPENING);
+    packet.command = 0x10;
+    registry_.on_rf_packet(packet, 2000);
+    EXPECT_EQ(cover_sm::operation(std::get<CoverDevice>(dev->logic).state), cover_sm::Operation::IDLE);
+    packet.command = 0x41; packet.channel++;
+    registry_.on_rf_packet(packet, 3000);
+    EXPECT_EQ(cover_sm::operation(std::get<CoverDevice>(dev->logic).state), cover_sm::Operation::IDLE);
+    EXPECT_EQ(dev->config.channel, cfg.channel);
 }

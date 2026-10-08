@@ -1014,3 +1014,28 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+
+TEST_F(CommandSenderTest, ExplicitFramingSurvivesFollowingCheckAndKeepsCounter) {
+  auto move = sender_.command();
+  move.dst_addr = 0x200001; move.type = 0x69; move.type2 = 0x10; move.hop = 9;
+  move.payload[1] = 3; move.payload[4] = 0x21; move.counter = 99;
+  auto check = move;
+  check.dst_addr = 0x300001; check.type = 0x6a; check.type2 = 0; check.payload[4] = 0;
+  ASSERT_TRUE(sender_.enqueue_encoded(move, 1));
+  ASSERT_TRUE(sender_.enqueue_encoded(check, 1));
+  mock_time_.current_time = 10;
+  sender_.process_queue(10, &mock_hub_, "test");
+  ASSERT_EQ(mock_hub_.recorded_commands.size(), 1u);
+  EXPECT_EQ(mock_hub_.recorded_commands[0].type, 0x69);
+  EXPECT_EQ(mock_hub_.recorded_commands[0].type2, 0x10);
+  EXPECT_EQ(mock_hub_.recorded_commands[0].hop, 9);
+  EXPECT_EQ(mock_hub_.recorded_commands[0].payload[1], 3);
+  EXPECT_EQ(mock_hub_.recorded_commands[0].counter, 1);
+  mock_hub_.complete_tx(true);
+  mock_time_.current_time = 20;
+  sender_.process_queue(20, &mock_hub_, "test");
+  ASSERT_EQ(mock_hub_.recorded_commands.size(), 2u);
+  EXPECT_EQ(mock_hub_.recorded_commands[1].dst_addr, 0x300001);
+  EXPECT_EQ(mock_hub_.recorded_commands[1].counter, 2);
+}
+

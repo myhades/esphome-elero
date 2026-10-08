@@ -1,5 +1,12 @@
-
+import {RfActionConfig} from './RfActionConfig';
 interface BlindConfig {
+  /**
+   * Command destination alias; canonical address is the motor status source
+   */
+  'command_address'?: string;
+  'command_profile'?: number;
+  'endpoint_margin_ms'?: number;
+  'actions'?: RfActionConfig[];
   /**
    * 3-byte destination address (hex string)
    * @example 0xa831e5

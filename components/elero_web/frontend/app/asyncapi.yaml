@@ -812,6 +812,21 @@ components:
       additionalProperties: false
       required: [address, name, channel, remote, open_ms, close_ms, poll_ms, supports_tilt, enabled]
       properties:
+        command_address:
+          type: string
+          description: Command destination alias; canonical address is the motor status source
+        command_profile:
+          type: integer
+          minimum: 0
+          maximum: 1
+        endpoint_margin_ms:
+          type: integer
+          minimum: 0
+          maximum: 30000
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RfActionConfig"
         address:
           type: string
           description: 3-byte destination address (hex string)
@@ -981,6 +996,27 @@ components:
           description: Removed group id.
           examples: ["grp_living_k8x2p1"]
 
+    RfActionConfig:
+      type: object
+      required: [enabled, command, type, type2, hop, payload_1, payload_2, destination]
+      properties:
+        enabled:
+          type: boolean
+        command:
+          type: integer
+        type:
+          type: integer
+        type2:
+          type: integer
+        hop:
+          type: integer
+        payload_1:
+          type: integer
+        payload_2:
+          type: integer
+        destination:
+          type: integer
+
     RfDirection:
       type: string
       enum: [rx, tx]
@@ -1089,6 +1125,21 @@ components:
         Fields vary by device_type: covers include open_ms/close_ms/poll_ms/supports_tilt,
         lights include dim_ms, remotes have only address/device_type/name.
       properties:
+        command_address:
+          type: string
+          description: Command destination alias; canonical address is the motor status source
+        command_profile:
+          type: integer
+          minimum: 0
+          maximum: 1
+        endpoint_margin_ms:
+          type: integer
+          minimum: 0
+          maximum: 30000
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RfActionConfig"
         address:
           type: string
           description: 3-byte device address (hex string)
@@ -1381,6 +1432,21 @@ components:
         identifies the device. All other fields are updateable.
         Only available when `crud` is `true` in the config event.
       properties:
+        command_address:
+          type: string
+          description: Command destination alias; canonical address is the motor status source
+        command_profile:
+          type: integer
+          minimum: 0
+          maximum: 1
+        endpoint_margin_ms:
+          type: integer
+          minimum: 0
+          maximum: 30000
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RfActionConfig"
         type:
           type: string
           const: upsert_device
@@ -1667,6 +1733,21 @@ components:
         hex strings (e.g., "0xa831e5"); the import handler accepts both
         hex strings and decimal integers for backward compatibility.
       properties:
+        command_address:
+          type: string
+          description: Command destination alias; canonical address is the motor status source
+        command_profile:
+          type: integer
+          minimum: 0
+          maximum: 1
+        endpoint_margin_ms:
+          type: integer
+          minimum: 0
+          maximum: 30000
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RfActionConfig"
         device_type:
           $ref: "#/components/schemas/DeviceType"
         dst_address:

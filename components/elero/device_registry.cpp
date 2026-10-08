@@ -14,10 +14,54 @@ namespace esphome::elero {
 
 static const char *const TAG = "elero.registry";
 
+static bool needs_profile(const NvsDeviceConfig &cfg) {
+    if (cfg.command_profile || (cfg.command_address && cfg.command_address != cfg.dst_address)) return true;
+    for (const auto &action : cfg.actions) if (action.enabled) return true;
+    return false;
+}
+
+static CoverAction semantic_action(uint8_t command) {
+    if (command == packet::command::UP) return CoverAction::UP;
+    if (command == packet::command::DOWN) return CoverAction::DOWN;
+    if (command == packet::command::STOP) return CoverAction::STOP;
+    if (command == packet::command::TILT) return CoverAction::PRESET;
+    return CoverAction::CHECK;
+}
+
+static EleroCommand cover_encoding(const NvsDeviceConfig &cfg, CoverAction action) {
+    EleroCommand cmd{};
+    cmd.src_addr = cfg.src_address;
+    cmd.dst_addr = action == CoverAction::CHECK ? cfg.dst_address : cfg.command_destination();
+    cmd.channel = cfg.channel;
+    const uint8_t standard[] = {0x20, 0x40, 0x10, 0x20, 0x40, 0x24, 0x00};
+    cmd.payload[4] = standard[static_cast<size_t>(action)];
+    if (cfg.command_profile == 1 && action == CoverAction::UP) cmd.payload[4] = 0x21;
+    if (cfg.command_profile == 1 && action == CoverAction::DOWN) cmd.payload[4] = 0x41;
+    cmd.type = action == CoverAction::STOP || action == CoverAction::CHECK ? packet::msg_type::COMMAND : packet::msg_type::BUTTON;
+    cmd.type2 = cmd.type == packet::msg_type::BUTTON ? packet::button::TYPE2 : packet::defaults::TYPE2;
+    cmd.hop = cmd.type == packet::msg_type::BUTTON ? packet::button::HOP : packet::defaults::HOP;
+    cmd.payload[0] = cfg.payload_1;
+    cmd.payload[1] = cfg.payload_2;
+    const auto &override = cfg.actions[static_cast<size_t>(action)];
+    if (override.enabled) {
+        cmd.payload[4] = override.command;
+        cmd.type = override.type;
+        cmd.type2 = override.type2;
+        cmd.hop = override.hop;
+        cmd.payload[0] = override.payload_1;
+        cmd.payload[1] = override.payload_2;
+        cmd.dst_addr = override.destination ? cfg.dst_address : cfg.command_destination();
+    }
+    return cmd;
+}
+
 bool DeviceRegistry::enqueue_or_warn_(Device &dev, uint8_t cmd_byte,
                                       uint8_t packets, uint8_t type,
                                       const char *context) {
-    if (dev.sender.enqueue(cmd_byte, packets, type)) {
+    const bool queued = dev.is_cover() && needs_profile(dev.config) && cmd_byte != packet::command::INTERMEDIATE
+        ? dev.sender.enqueue_encoded(cover_encoding(dev.config, semantic_action(cmd_byte)), packets)
+        : dev.sender.enqueue(cmd_byte, packets, type);
+    if (queued) {
         return true;
     }
 
@@ -39,6 +83,8 @@ bool DeviceRegistry::enqueue_check_(Device &dev, const char *context) {
 void DeviceRegistry::init_preferences() {
     for (size_t i = 0; i < MAX_DEVICES; ++i) {
         prefs_[i] = global_preferences->make_preference<NvsDeviceConfig>(
+            fnv1_hash("elero_device_v4") + i);
+        legacy_prefs_[i] = global_preferences->make_preference<NvsDeviceConfigV3>(
             fnv1_hash("elero_device") + i);
     }
     for (size_t i = 0; i < MAX_GROUPS; ++i) {
@@ -96,7 +142,19 @@ void DeviceRegistry::restore_all() {
     size_t restored = 0;
     for (size_t i = 0; i < MAX_DEVICES; ++i) {
         NvsDeviceConfig cfg{};
-        if (prefs_[i].load(&cfg) && cfg.is_valid()) {
+        bool loaded = prefs_[i].load(&cfg);
+        // A V4 tombstone is authoritative: never resurrect a deleted V3 device.
+        if (!loaded) {
+            NvsDeviceConfigV3 legacy{};
+            if (legacy_prefs_[i].load(&legacy) && legacy.is_valid()) {
+                cfg = migrate_v3(legacy);
+                loaded = true;
+                if (!prefs_[i].save(&cfg) || !global_preferences->sync()) {
+                    ESP_LOGW(TAG, "V3 migration not persisted for slot %zu; original preserved", i);
+                }
+            }
+        }
+        if (loaded && cfg.is_valid()) {
             init_device(slots_[i], cfg);
             ++restored;
             ESP_LOGI(TAG, "Restored %s '%s' at 0x%06x (slot %zu)",
@@ -164,11 +222,16 @@ void DeviceRegistry::setup_adapters() {
 // ═════════════════════════════════════════════════════════════════════════════
 
 Device *DeviceRegistry::upsert(const NvsDeviceConfig &config) {
+    if (!config.is_valid()) {
+        ESP_LOGW(TAG, "Invalid device config");
+        return nullptr;
+    }
     // Try to find existing device with same address+type
     Device *existing = find(config.dst_address, config.type);
     if (existing) {
-        update_device_config(*existing, config);
-        persist(*existing);
+        auto saved = config;
+        if (!save_config_(saved, slot_index(*existing))) return nullptr;
+        update_device_config(*existing, saved);
         notify_config_changed_(*existing);
         ESP_LOGI(TAG, "Updated %s '%s' at 0x%06x",
                  device_type_str(config.type), config.name, config.dst_address);
@@ -183,9 +246,10 @@ Device *DeviceRegistry::upsert(const NvsDeviceConfig &config) {
         return nullptr;
     }
 
-    init_device(*slot, config);
+    auto saved = config;
+    if (!save_config_(saved, slot_index(*slot))) return nullptr;
+    init_device(*slot, saved);
     if (config.type == DeviceType::COVER) assign_poll_stagger_();
-    persist(*slot);
     notify_added_(*slot);
     notify_state_changed_(*slot, millis());
     ESP_LOGI(TAG, "Added %s '%s' at 0x%06x (slot %zu)",
@@ -199,16 +263,18 @@ bool DeviceRegistry::remove(uint32_t address, DeviceType type) {
     if (!dev) return false;
 
     ESP_LOGI(TAG, "Removing %s at 0x%06x", device_type_str(type), address);
-    notify_removed_(*dev);
-
     // Clear NVS (only when persistence is enabled)
     if (nvs_enabled_ && prefs_initialized_) {
         size_t idx = slot_index(*dev);
         NvsDeviceConfig empty{};
         empty.version = 0;  // Mark as invalid
-        prefs_[idx].save(&empty);
+        if (!prefs_[idx].save(&empty) || !global_preferences->sync()) {
+            ESP_LOGW(TAG, "Failed to delete device 0x%06x", address);
+            return false;
+        }
     }
 
+    notify_removed_(*dev);
     deactivate_device(*dev);
     prune_device_from_groups_(address);
     return true;
@@ -493,6 +559,17 @@ void DeviceRegistry::command_group(Device *const *devices, size_t count, uint8_t
         return;
     }
 
+    // A heterogeneous profile cannot share one encoded broadcast.
+    bool individual = false;
+    for (size_t i = 0; i < count; ++i) individual |= needs_profile(devices[i]->config);
+    if (individual) {
+        for (size_t i = 0; i < count; ++i) {
+            if (devices[i]->is_cover()) command_cover(*devices[i], cmd_byte);
+            else command_light(*devices[i], cmd_byte);
+        }
+        return;
+    }
+
     // Build the group command on the first device's sender.
     // Set multi-dest fields so build_tx_packet_ dispatches to build_group_button_packet.
     Device &lead = *devices[0];
@@ -671,6 +748,19 @@ void DeviceRegistry::on_rf_packet(const RfPacketInfo &pkt, uint32_t now) {
         // Remote commands are passive — we only auto-discover the remote.
         // The blind's status response (via dispatch_status_) handles state.
         track_remote_(pkt, now);
+        for (auto &dev : slots_) {
+            if (!dev.active || !dev.is_cover() || dev.config.command_destination() != pkt.dst ||
+                dev.config.src_address != pkt.src || dev.config.channel != pkt.channel) continue;
+            for (CoverAction action : {CoverAction::UP, CoverAction::DOWN, CoverAction::STOP}) {
+                if (cover_encoding(dev.config, action).payload[4] != pkt.command) continue;
+                const uint8_t semantic = action == CoverAction::UP ? packet::command::UP :
+                    action == CoverAction::DOWN ? packet::command::DOWN : packet::command::STOP;
+                auto &cover = std::get<CoverDevice>(dev.logic);
+                cover.state = cover_sm::on_command(cover.state, semantic, now, cover_context(dev.config));
+                notify_state_changed_(dev, now);
+                break;
+            }
+        }
     }
 }
 
@@ -906,14 +996,29 @@ size_t DeviceRegistry::count_groups() const {
 // PERSISTENCE
 // ═════════════════════════════════════════════════════════════════════════════
 
-void DeviceRegistry::persist(Device &dev, size_t slot_idx) {
-    if (!prefs_initialized_ || slot_idx >= MAX_DEVICES) return;
-    dev.config.updated_at = millis();
-    prefs_[slot_idx].save(&dev.config);
+bool DeviceRegistry::save_config_(NvsDeviceConfig &config, size_t slot_idx) {
+    if (!nvs_enabled_) return true;
+    if (!prefs_initialized_ || slot_idx >= MAX_DEVICES) {
+        ESP_LOGW(TAG, "Device persistence unavailable");
+        return false;
+    }
+    config.updated_at = millis() ? millis() : 1;
+    if (!prefs_[slot_idx].save(&config) || !global_preferences->sync()) {
+        ESP_LOGW(TAG, "Failed to persist device 0x%06x", config.dst_address);
+        return false;
+    }
+    return true;
 }
 
-void DeviceRegistry::persist(Device &dev) {
-    persist(dev, slot_index(dev));
+bool DeviceRegistry::persist(Device &dev, size_t slot_idx) {
+    auto saved = dev.config;
+    if (!save_config_(saved, slot_idx)) return false;
+    dev.config = saved;
+    return true;
+}
+
+bool DeviceRegistry::persist(Device &dev) {
+    return persist(dev, slot_index(dev));
 }
 
 void DeviceRegistry::persist_group_(const NvsGroupConfig &group, size_t slot_idx) {

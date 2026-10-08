@@ -1,7 +1,7 @@
 import { useSignal } from '@preact/signals'
 import { Card } from './ui/card'
 import { buildFullColumns } from './packet-table'
-import { rfPackets, displayNames, deviceTypeMap, clearRfPackets, capturePaused, captureDropped, diagnosticLogs, websocketErrors } from '@/store'
+import { rfPackets, displayNames, deviceTypeMap, clearRfPackets, capturePaused, captureDropped, diagnosticLogs, websocketErrors, resetDismissedDiscoveries } from '@/store'
 import { CAPTURE_LIMIT, copyText, downloadText, serializeCapture } from '@/lib/diagnostics'
 import { DataTable } from './ui/data-table'
 
@@ -38,6 +38,7 @@ export function RfPackets() {
       <div className="flex flex-wrap items-center gap-2 text-xs [&_button]:rounded-md [&_button]:border [&_button]:px-3 [&_button]:py-2 [&_button]:hover:bg-accent [&_button]:disabled:opacity-40">
         <input className="h-8 rounded-md border bg-background px-2" aria-label="Filter capture" placeholder="Address, type, state or timestamp" value={query.value} onInput={e => { query.value = e.currentTarget.value }} />
         <button onClick={() => { capturePaused.value = !capturePaused.value }}>{capturePaused.value ? 'Resume capture' : 'Pause capture'}</button>
+        <button onClick={resetDismissedDiscoveries}>Reset dismissed discoveries</button>
         <button onClick={() => { clearRfPackets(); selected.value = new Set() }}>Clear capture</button>
         <button disabled={!data.length} onClick={() => copy(data)}>Copy filtered</button>
         <button disabled={!selectedRows.length} onClick={() => copy(selectedRows)}>Copy selected ({selectedRows.length})</button>

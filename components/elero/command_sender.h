@@ -56,6 +56,11 @@ class CommandSender : public TxClient {
 
         {
           const auto &entry = this->command_queue_.front();
+          if (entry.explicit_encoding) {
+            const uint8_t counter = this->command_.counter;
+            this->command_ = entry.encoding;
+            this->command_.counter = counter;
+          } else {
           this->command_.payload[4] = entry.cmd;
           this->command_.type = entry.type;
           if (entry.type == packet::msg_type::BUTTON) {
@@ -64,6 +69,7 @@ class CommandSender : public TxClient {
           } else {
             this->command_.type2 = packet::defaults::TYPE2;
             this->command_.hop = packet::defaults::HOP;
+          }
           }
         }
 
@@ -180,6 +186,20 @@ class CommandSender : public TxClient {
     return true;
   }
 
+  /// Snapshot explicit framing at enqueue time; later CHECKs cannot overwrite it.
+  [[nodiscard]] bool enqueue_encoded(const EleroCommand &encoding, uint8_t packets) {
+    if (this->command_queue_.size() >= packet::limits::MAX_COMMAND_QUEUE) {
+      ESP_LOGW("elero.tx", "Command queue full, rejecting encoded command");
+      return false;
+    }
+    QueueEntry entry{encoding.payload[4], packets, encoding.type};
+    entry.explicit_encoding = true;
+    entry.encoding = encoding;
+    this->command_queue_.push(entry);
+    if (this->state_ == State::IDLE) this->state_ = State::WAIT_DELAY;
+    return true;
+  }
+
   void clear_queue() {
     this->command_queue_ = std::queue<QueueEntry>{};
     this->send_packets_ = 0;
@@ -238,7 +258,11 @@ class CommandSender : public TxClient {
     }
   }
 
-  struct QueueEntry { uint8_t cmd; uint8_t packets; uint8_t type; };
+  struct QueueEntry {
+    uint8_t cmd; uint8_t packets; uint8_t type;
+    bool explicit_encoding{false};
+    EleroCommand encoding{};
+  };
 
   EleroCommand command_{1, 0, 0, 0, 0, 0, 0, {0}};
   std::queue<QueueEntry> command_queue_;

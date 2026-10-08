@@ -1,3 +1,4 @@
+import {RfActionConfig} from './RfActionConfig';
 import {DeviceType} from './DeviceType';
 /**
  * One device. Mirrors `NvsDeviceConfig` fields. Address fields are
@@ -5,6 +6,13 @@ import {DeviceType} from './DeviceType';
  * hex strings and decimal integers for backward compatibility.
  */
 interface DeviceSnapshot {
+  /**
+   * Command destination alias; canonical address is the motor status source
+   */
+  'command_address'?: string;
+  'command_profile'?: number;
+  'endpoint_margin_ms'?: number;
+  'actions'?: RfActionConfig[];
   /**
    * Type of device (cover, light, or remote control)
    */

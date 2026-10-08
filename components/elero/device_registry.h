@@ -185,10 +185,10 @@ class DeviceRegistry {
     // ═════════════════════════════════════════════════════════════════════════
 
     /// Persist a single device to NVS.
-    void persist(Device &dev, size_t slot_idx);
+    bool persist(Device &dev, size_t slot_idx);
 
     /// Persist a device (finds slot index automatically).
-    void persist(Device &dev);
+    bool persist(Device &dev);
 
     // ═════════════════════════════════════════════════════════════════════════
     // HUB-LEVEL CONFIG (user-overridable hub display name)
@@ -224,6 +224,8 @@ class DeviceRegistry {
 
     // NVS preference handles (one per slot)
     ESPPreferenceObject prefs_[MAX_DEVICES]{};
+    ESPPreferenceObject legacy_prefs_[MAX_DEVICES]{};
+    bool save_config_(NvsDeviceConfig &config, size_t slot_idx);
     ESPPreferenceObject group_prefs_[MAX_GROUPS]{};
     bool prefs_initialized_{false};
 
