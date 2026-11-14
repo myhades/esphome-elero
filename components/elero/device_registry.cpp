@@ -62,6 +62,9 @@ bool DeviceRegistry::enqueue_or_warn_(Device &dev, uint8_t cmd_byte,
         ? dev.sender.enqueue_encoded(cover_encoding(dev.config, semantic_action(cmd_byte)), packets)
         : dev.sender.enqueue(cmd_byte, packets, type);
     if (queued) {
+        ESP_LOGD(TAG, "COMMAND t=%lu device=0x%06x action=0x%02x context=%s queue=%u",
+                 static_cast<unsigned long>(millis()), dev.config.dst_address, cmd_byte,
+                 context, static_cast<unsigned>(dev.sender.queue_size()));
         return true;
     }
 
@@ -1287,6 +1290,14 @@ void DeviceRegistry::notify_state_changed_(Device &dev, uint32_t now) {
     if (dev.is_cover()) {
         auto snap = compute_cover_snapshot(dev, now);
         changes = diff_and_update_cover(snap, std::get<CoverDevice>(dev.logic).published);
+        // Log semantic transitions, not each tick of an estimated position.
+        if (changes & (state_change::HA_STATE | state_change::OPERATION |
+                       state_change::STATE_STRING | state_change::PROBLEM)) {
+            ESP_LOGD(TAG, "STATE t=%lu device=0x%06x state=%s reason=%s raw=%s position=%.3f known=%u source=%s response_age=%lu problem=%s",
+                     static_cast<unsigned long>(now), dev.config.dst_address, snap.ha_state,
+                     snap.transition_reason, snap.state_string, snap.position, snap.position_known,
+                     snap.position_source, static_cast<unsigned long>(snap.response_age_ms), snap.problem_type);
+        }
     } else if (dev.is_light()) {
         auto snap = compute_light_snapshot(dev, now);
         changes = diff_and_update_light(snap, std::get<LightDevice>(dev.logic).published);

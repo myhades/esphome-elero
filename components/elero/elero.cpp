@@ -41,7 +41,7 @@ void Elero::loop() {
     } else {
       this->stat_tx_fail_++;
     }
-    ESP_LOGD(TAG_RF, "TX_RESULT t=%lu success=%u raw=%s",
+    ESP_LOGD(TAG_RF, "TX_RESULT t=%lu radio_success=%u raw=%s",
              static_cast<unsigned long>(result.packet.timestamp_ms), result.success,
              format_hex_pretty(result.packet.raw, result.packet.raw_len).c_str());
     if (this->registry_ != nullptr)
@@ -576,6 +576,14 @@ void Elero::publish_stats_() {
   if (now - this->last_stats_publish_ms_ < 30000)
     return;
   this->last_stats_publish_ms_ = now;
+
+  ESP_LOGD(TAG_RF, "STATS t=%lu tx_ok=%lu tx_fail=%lu rx=%lu rx_drop=%lu fifo_overflow=%lu watchdog=%lu last_rx_age=%lu",
+           static_cast<unsigned long>(now), static_cast<unsigned long>(this->stat_tx_success_),
+           static_cast<unsigned long>(this->stat_tx_fail_), static_cast<unsigned long>(this->stat_rx_packets_),
+           static_cast<unsigned long>(this->stat_rx_drops_.load(std::memory_order_relaxed)),
+           static_cast<unsigned long>(this->stat_fifo_overflows_.load(std::memory_order_relaxed)),
+           static_cast<unsigned long>(this->stat_watchdog_recoveries_.load(std::memory_order_relaxed)),
+           static_cast<unsigned long>(this->stat_last_rx_ms_ ? now - this->stat_last_rx_ms_ : 0));
 
   if (this->stats_tx_success_)
     this->stats_tx_success_->publish_state(this->stat_tx_success_);

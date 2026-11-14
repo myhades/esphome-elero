@@ -76,7 +76,7 @@ class CommandSender : public TxClient {
         if (parent->request_tx(this, this->command_)) {
           this->state_ = State::TX_PENDING;
           this->tx_start_time_ = now;
-          ESP_LOGV(tag, "TX started for 0x%06x cmd=0x%02x, packet %d/%d",
+          ESP_LOGD(tag, "TX queued to radio for 0x%06x cmd=0x%02x, packet %d/%d",
                    this->command_.dst_addr, this->command_.payload[4],
                    this->send_packets_ + 1, this->command_queue_.front().packets);
         } else {
@@ -131,7 +131,7 @@ class CommandSender : public TxClient {
           ? packet::button::PACKETS
           : this->command_queue_.front().packets;
       if (this->send_packets_ >= target_packets) {
-        ESP_LOGV(this->log_tag_, "Command 0x%02x to 0x%06x complete (%d packets)",
+        ESP_LOGD(this->log_tag_, "Command 0x%02x to 0x%06x RF burst complete (%d packets); motor acceptance unconfirmed",
                  this->command_.payload[4], this->command_.dst_addr, this->send_packets_);
         this->advance_queue_();
       } else {
