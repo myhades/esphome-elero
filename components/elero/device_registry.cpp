@@ -74,7 +74,12 @@ bool DeviceRegistry::enqueue_or_warn_(Device &dev, uint8_t cmd_byte,
 }
 
 bool DeviceRegistry::debug_action(Device &dev, CoverAction action) {
-    if (action > CoverAction::TILT_DOWN) return false;
+    if (action > CoverAction::TILT_DOWN || !dev.active || !dev.is_cover() || !dev.config.is_enabled()) return false;
+    if (action == CoverAction::STOP) {
+        // Match the cover's working STOP + CHECK path, including target cancellation.
+        command_cover(dev, packet::command::STOP);
+        return true;
+    }
     const auto cmd = cover_encoding(dev.config, action);
     return debug_send(dev, cmd.payload[4], cmd.type, cmd.type2, cmd.hop,
                       cmd.dst_addr, cmd.payload[0], cmd.payload[1], packet::button::PACKETS);

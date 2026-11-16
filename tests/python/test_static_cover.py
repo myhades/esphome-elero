@@ -31,7 +31,9 @@ def test_complete_native_codegen(tmp_path):
     assert "cfg.close_duration_ms = 29000" in source
     assert "cfg.endpoint_margin_ms = 2000" in source
     assert "cfg.actions[0].command = 33" in source
-    for index in (0, 1, 2):
+    assert "cfg.actions[3].command = 32" in source
+    assert "cfg.actions[4].command = 64" in source
+    for index in (0, 1, 2, 3, 4):
         assert f"cfg.actions[{index}].type = 105" in source
         assert f"cfg.actions[{index}].type2 = 16" in source
         assert f"cfg.actions[{index}].hop = 10" in source

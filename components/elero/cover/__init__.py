@@ -21,6 +21,8 @@ def monotel2_commands():
     0x10, hop 0x0A, source/backward/forward all our remote) is inferred from the
     relay copies; the original direct transmission was not captured.
     CHECK retains the existing status destination and framing.
+    Short-command bytes 0x20/0x40 use the same addressing as working long
+    commands. This is a candidate for hardware testing, not a captured short press.
     """
     movement = {
         "type": 0x69, "type2": 0x10, "hop": 0x0A,
@@ -28,7 +30,8 @@ def monotel2_commands():
     }
     return {
         **{name: dict(movement, command=command)
-           for name, command in (("up", 0x21), ("down", 0x41), ("stop", 0x10))},
+           for name, command in (("up", 0x21), ("down", 0x41), ("stop", 0x10),
+                                 ("tilt_up", 0x20), ("tilt_down", 0x40))},
         "check": {
             "command": 0x00, "type": 0x6A, "type2": 0x00, "hop": 0x0A,
             "payload_1": 0x00, "payload_2": 0x04, "destination": "status",
