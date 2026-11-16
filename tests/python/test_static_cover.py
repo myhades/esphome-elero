@@ -31,9 +31,9 @@ def test_complete_native_codegen(tmp_path):
     assert "cfg.close_duration_ms = 29000" in source
     assert "cfg.endpoint_margin_ms = 2000" in source
     assert "cfg.actions[0].command = 33" in source
-    assert "cfg.actions[3].command = 32" in source
-    assert "cfg.actions[4].command = 64" in source
-    for index in (0, 1, 2, 3, 4):
+    assert "cfg.actions[3].enabled = 1" not in source
+    assert "cfg.actions[4].enabled = 1" not in source
+    for index in (0, 1, 2):
         assert f"cfg.actions[{index}].type = 105" in source
         assert f"cfg.actions[{index}].type2 = 16" in source
         assert f"cfg.actions[{index}].hop = 10" in source
@@ -47,9 +47,9 @@ def test_complete_native_codegen(tmp_path):
     assert "mongoose" not in source
     assert "elero_web" not in source
     assert "TiltStepButton(" not in source
-    assert source.count("App.register_button(") == 6
-    assert source.count(" elero::DebugCommandButton(raffstore, ") == 5
-    for action in ("TILT_UP", "UP", "TILT_DOWN", "DOWN", "STOP"):
+    assert source.count("App.register_button(") == 4
+    assert source.count(" elero::DebugCommandButton(raffstore, ") == 3
+    for action in ("UP", "DOWN", "STOP"):
         assert f"elero::CoverAction::{action})" in source
     assert "set_refresh_button(" in source
     assert "set_rssi_sensor(" in source

@@ -11,9 +11,7 @@ TiltStepButton = elero_ns.class_("TiltStepButton", button.Button)
 DebugCommandButton = elero_ns.class_("DebugCommandButton", button.Button)
 CoverAction = elero_ns.enum("CoverAction", is_class=True)
 DEBUG_ACTIONS = {
-    "short_up": CoverAction.TILT_UP,
     "long_up": CoverAction.UP,
-    "short_down": CoverAction.TILT_DOWN,
     "long_down": CoverAction.DOWN,
     "stop": CoverAction.STOP,
 }

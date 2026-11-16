@@ -21,6 +21,7 @@ logger:
     elero.rf: VERBOSE
 
 wifi:
+  power_save_mode: none
   ssid: test-network
   password: test-password
 
@@ -97,19 +98,9 @@ sensor:
 button:
   - platform: elero
     cover_id: raffstore
-    action: short_up
-    name: Short Up
-    icon: mdi:arrow-up
-  - platform: elero
-    cover_id: raffstore
     action: long_up
     name: Long Up
     icon: mdi:arrow-up-bold
-  - platform: elero
-    cover_id: raffstore
-    action: short_down
-    name: Short Down
-    icon: mdi:arrow-down
   - platform: elero
     cover_id: raffstore
     action: long_down

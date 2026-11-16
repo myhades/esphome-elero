@@ -74,15 +74,10 @@ bool DeviceRegistry::enqueue_or_warn_(Device &dev, uint8_t cmd_byte,
 }
 
 bool DeviceRegistry::debug_action(Device &dev, CoverAction action) {
-    if (action > CoverAction::TILT_DOWN || !dev.active || !dev.is_cover() || !dev.config.is_enabled()) return false;
-    if (action == CoverAction::STOP) {
-        // Match the cover's working STOP + CHECK path, including target cancellation.
-        command_cover(dev, packet::command::STOP);
-        return true;
-    }
-    const auto cmd = cover_encoding(dev.config, action);
-    return debug_send(dev, cmd.payload[4], cmd.type, cmd.type2, cmd.hop,
-                      cmd.dst_addr, cmd.payload[0], cmd.payload[1], packet::button::PACKETS);
+    if (action > CoverAction::STOP || !dev.active || !dev.is_cover() || !dev.config.is_enabled()) return false;
+    const uint8_t commands[] = {packet::command::UP, packet::command::DOWN, packet::command::STOP};
+    command_cover(dev, commands[static_cast<size_t>(action)]);
+    return true;
 }
 
 bool DeviceRegistry::debug_send(Device &dev, int command, int type, int type2, int hop,
@@ -461,13 +456,19 @@ void DeviceRegistry::command_cover(Device &dev, uint8_t cmd_byte) {
         cover.state = cover_sm::on_command(cover.state, cmd_byte, now, ctx);
         cover.target_position = cover_sm::NO_TARGET;
     } else {
+        // A newer manual direction supersedes stale queued work. Do not reject
+        // HA button clicks simply because the previous burst is still finishing.
+        if (dev.config.command_profile == 1) {
+            dev.sender.clear_queue();
+            cover.target_position = cover_sm::NO_TARGET;
+        }
         if (cmd_byte == packet::command::UP) cover.last_direction = cover_sm::Operation::OPENING;
         if (cmd_byte == packet::command::DOWN) cover.last_direction = cover_sm::Operation::CLOSING;
         bool move_queued = enqueue_or_warn_(dev, cmd_byte, packet::button::PACKETS,
                                             packet::msg_type::BUTTON,
                                             "command_cover(move)");
         if (!move_queued) return;
-        (void) enqueue_check_(dev, "command_cover(move)");
+        if (dev.config.command_profile != 1) (void) enqueue_check_(dev, "command_cover(move)");
         cover.state = cover_sm::on_command(cover.state, cmd_byte, now, ctx);
         if (move_queued) {
             cover.poll.on_command_sent(now);
@@ -509,7 +510,7 @@ void DeviceRegistry::set_cover_position(Device &dev, float target) {
     cover.position_confirmed = false;
     cover.tilt_action_active = false;
     cover.transition_reason = "position_queued";
-    (void) enqueue_check_(dev, "set_cover_position");
+    if (dev.config.command_profile != 1) (void) enqueue_check_(dev, "set_cover_position");
     cover.state = cover_sm::on_command(cover.state, cmd, now, ctx);
     if (cmd == packet::command::UP) cover.last_direction = cover_sm::Operation::OPENING;
     if (cmd == packet::command::DOWN) cover.last_direction = cover_sm::Operation::CLOSING;
@@ -1017,7 +1018,9 @@ void DeviceRegistry::loop_cover_(Device &dev, CoverDevice &cover, uint32_t now) 
     // 2. Poll if due — single packet suffices (blind is mains-powered, always
     //    listening). If missed, retry via normal poll interval.
     bool moving = cover_sm::is_moving(cover.state);
-    if (cover.poll.should_poll(now, moving)) {
+    // This Raffstore may treat CHECK as STOP. Listen continuously and leave
+    // queries to the explicit query button or the requested STOP sequence.
+    if (dev.config.command_profile != 1 && cover.poll.should_poll(now, moving)) {
         if (enqueue_check_(dev, "loop_cover(poll)")) {
             cover.poll.on_poll_sent(now);
         }
@@ -1025,7 +1028,8 @@ void DeviceRegistry::loop_cover_(Device &dev, CoverDevice &cover, uint32_t now) 
 
     // 3. Post-stop verification — after Stopping cooldown expires, verify the
     //    blind's actual resting position (frozen estimate may drift).
-    if (state_type_changed && was_stopping && std::holds_alternative<cover_sm::Idle>(cover.state)) {
+    if (dev.config.command_profile != 1 && state_type_changed && was_stopping &&
+        std::holds_alternative<cover_sm::Idle>(cover.state)) {
         if (enqueue_check_(dev, "loop_cover(post_stop_check)")) {
             cover.poll.on_poll_sent(now);
         }
