@@ -7,7 +7,6 @@
 #pragma once
 
 #ifdef USE_COVER
-#include <cmath>
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/components/cover/cover.h"
@@ -159,7 +158,7 @@ class EspCoverShell : public cover::Cover, public Component {
 
 #ifdef USE_SENSOR
     if ((changes & state_change::RSSI) && rssi_sensor_ != nullptr)
-      rssi_sensor_->publish_state(device_->rf.last_seen_ms ? static_cast<float>(pub.rssi_rounded) : NAN);
+      rssi_sensor_->publish_state(static_cast<float>(pub.rssi_rounded));
 #endif
 #ifdef USE_TEXT_SENSOR
     if (rf_state_sensor_) rf_state_sensor_->publish_state(pub.state_string);

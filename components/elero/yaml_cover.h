@@ -26,9 +26,6 @@ class YamlCover final : public EspCoverShell, public OutputAdapter {
   void tilt_step(bool up) {
     if (device_) registry_->command_cover_tilt_step(*device_, up);
   }
-  bool debug_action(CoverAction action) {
-    return device_ && registry_ && registry_->debug_action(*device_, action);
-  }
   bool debug_send(int command, int type, int type2, int hop, int destination,
                   int payload_1, int payload_2, int packets) {
     if (!device_ || !registry_) {

@@ -147,15 +147,6 @@ size_t CC1101Driver::read_fifo(uint8_t *buf, size_t max_len) {
   }
 
   this->read_buf(CC1101_RXFIFO, buf, fifo_count);
-#if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE
-  // Read on the RF task only. These are live chip values after draining the FIFO;
-  // the appended status bytes remain the authoritative per-packet measurements.
-  const auto freqest = static_cast<int8_t>(this->read_status(CC1101_FREQEST));
-  const auto lqi = this->read_status(CC1101_LQI);
-  const auto status = this->read_status(CC1101_PKTSTATUS);
-  ESP_LOGV("elero.rf", "RX_RADIO bytes=%u freqest=%d lqi_reg=0x%02x pktstatus=0x%02x",
-           fifo_count, freqest, lqi, status);
-#endif
   return fifo_count;
 }
 
@@ -308,11 +299,6 @@ void CC1101Driver::init_registers() {
   (void) this->write_reg(CC1101_SYNC1, 0xD3);
   (void) this->write_reg(CC1101_SYNC0, 0x91);
   (void) this->write_burst(CC1101_PATABLE, patable_data, 8);
-
-  ESP_LOGD("elero.rf", "RF_CONFIG freq=%02x.%02x.%02x mdm=%02x.%02x.%02x packet=%02x.%02x",
-           this->read_reg(CC1101_FREQ2), this->read_reg(CC1101_FREQ1), this->read_reg(CC1101_FREQ0),
-           this->read_reg(CC1101_MDMCFG4), this->read_reg(CC1101_MDMCFG3), this->read_reg(CC1101_MDMCFG2),
-           this->read_reg(CC1101_PKTCTRL1), this->read_reg(CC1101_PKTCTRL0));
 
   (void) this->write_cmd(CC1101_SRX);
   (void) this->wait_rx();

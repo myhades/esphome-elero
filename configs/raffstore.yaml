@@ -21,7 +21,6 @@ logger:
     elero.rf: VERBOSE
 
 wifi:
-  power_save_mode: none
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
@@ -80,7 +79,12 @@ cover:
     close_duration: 0s
     endpoint_margin: 2s
     tilt: false
-    # Uses this fork's captured MonoTel 2 command profile.
+    # Restore original frame families; long-travel motor acceptance still needs testing.
+    commands:
+      up: {command: 0x21, type: 0x44, type2: 0x10, hop: 0x00}
+      down: {command: 0x41, type: 0x44, type2: 0x10, hop: 0x00}
+      stop: {command: 0x10, type: 0x6A, destination: status}
+      check: {command: 0x00, type: 0x6A, destination: status}
 
 sensor:
   - platform: elero
@@ -100,21 +104,6 @@ sensor:
       name: RF Last RX Age
 
 button:
-  - platform: elero
-    cover_id: raffstore
-    action: long_up
-    name: Long Up
-    icon: mdi:arrow-up-bold
-  - platform: elero
-    cover_id: raffstore
-    action: long_down
-    name: Long Down
-    icon: mdi:arrow-down-bold
-  - platform: elero
-    cover_id: raffstore
-    action: stop
-    name: Stop
-    icon: mdi:stop
   - platform: elero
     cover_id: raffstore
     name: "查询状态"

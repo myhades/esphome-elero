@@ -20,13 +20,6 @@ Start with the [example configuration](configs/raffstore.yaml). Set your Wi-Fi a
 - HA uses 100% for fully open and 0% for fully closed. Intermediate positions are time estimates. Unknown startup position displays a 50% placeholder.
 - Omit `tilt` and both tilt commands when unused. To enable it, set `tilt: true`, configure `commands.tilt_up/tilt_down`, and add buttons with `action: tilt_up/tilt_down`.
 - Configure RSSI under `sensor` and the status-query button under `button`, using `platform: elero` and `cover_id` to select the cover.
-- Three buttons use `action: long_up`, `long_down`, and `stop`. They share the cover's normal control path. A newer direction replaces pending commands; Stop clears the queue and sends STOP + CHECK.
 - Under `text_sensor`, expose `rf_state`, `position_source` and `transition_reason` separately. Use the [HA template](configs/ha-rssi-attributes.yaml) to combine them as RSSI attributes.
 
-Omitting `commands` selects this fork's installed MonoTel 2 profile: UP `0x21`, DOWN `0x41` and STOP `0x10` use `0x69`, payload `00 01`, and `command_address`. CHECK keeps `0x6A`, payload `00 04`, and `status_address`. Explicit `commands` remain available for diagnostic overrides.
-
-The profile comes from relayed packets captured during successful remote operation. Origin routing uses `type2: 0x10`, `hop: 0x0A` and the configured remote as source/backward/forward address. Counters and encoding seeds are generated, rather than replayed. YAML is authoritative; legacy NVS data is preserved.
-
-CHECK may stop this Raffstore. Automatic queries are disabled for the personal profile, including queries after movement commands and during travel. The receiver keeps listening; the query button remains available. RSSI stays Unknown until a packet from the configured device is received. The example disables Wi-Fi power saving to avoid delayed control delivery.
-
-Long commands and STOP + CHECK have worked in user tests, but intermittent loss of control remains unresolved. A completed RF transmission does not confirm motor acceptance.
+YAML is authoritative; legacy NVS data is preserved. Up, down and STOP have been confirmed on the user's motor; tilt remains unverified.

@@ -11,31 +11,6 @@ YamlCover = elero_ns.class_("YamlCover", cover.Cover, cg.Component, OutputAdapte
 ACTIONS = {"up": 0, "down": 1, "stop": 2, "tilt_up": 3, "tilt_down": 4, "check": 6}
 ADDRESS = cv.hex_int_range(min=1, max=0xFFFFFF)
 DURATION = cv.All(cv.positive_time_period_milliseconds, cv.Range(max=cv.TimePeriod(milliseconds=120000)))
-
-
-def monotel2_commands():
-    """Installed blind's captured command family, with origin routing fields.
-
-    Successful remote operations were captured as 0x69 relays with payload 00 01.
-    Keep their command destination for UP, DOWN and STOP. Source routing (type2
-    0x10, hop 0x0A, source/backward/forward all our remote) is inferred from the
-    relay copies; the original direct transmission was not captured.
-    CHECK retains the existing status destination and framing.
-    """
-    movement = {
-        "type": 0x69, "type2": 0x10, "hop": 0x0A,
-        "payload_1": 0x00, "payload_2": 0x01, "destination": "command",
-    }
-    return {
-        **{name: dict(movement, command=command)
-           for name, command in (("up", 0x21), ("down", 0x41), ("stop", 0x10))},
-        "check": {
-            "command": 0x00, "type": 0x6A, "type2": 0x00, "hop": 0x0A,
-            "payload_1": 0x00, "payload_2": 0x04, "destination": "status",
-        },
-    }
-
-
 def action_header_defaults(config):
     config.setdefault("type2", 0x10 if config["type"] == 0x44 else 0)
     config.setdefault("hop", 0 if config["type"] == 0x44 else 0x0A)
@@ -78,7 +53,7 @@ CONFIG_SCHEMA = cv.All(cover.cover_schema(YamlCover).extend({
         cv.positive_time_period_milliseconds,
         cv.Range(min=cv.TimePeriod(milliseconds=1), max=cv.TimePeriod(milliseconds=30000))),
     cv.Optional("tilt", default=False): cv.boolean,
-    cv.Optional("commands", default=monotel2_commands): cv.Schema({
+    cv.Required("commands"): cv.Schema({
         **{cv.Required(action): ACTION_SCHEMA for action in ("up", "down", "stop", "check")},
         **{cv.Optional(action): ACTION_SCHEMA for action in ("tilt_up", "tilt_down")},
     }),
