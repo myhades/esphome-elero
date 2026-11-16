@@ -61,6 +61,7 @@ class CommandSender : public TxClient {
             this->command_ = entry.encoding;
             this->command_.counter = counter;
           } else {
+          this->command_.diagnostic = false;
           this->command_.payload[4] = entry.cmd;
           this->command_.type = entry.type;
           if (entry.type == packet::msg_type::BUTTON) {

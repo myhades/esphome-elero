@@ -36,6 +36,10 @@ void Elero::loop() {
   // behind slow RX/logging work on the main loop.
   TxResult result{};
   while (xQueueReceive(this->tx_done_queue_handle_, &result, 0) == pdPASS) {
+    if (result.cancelled) {
+      if (result.client != nullptr) result.client->on_tx_complete(false);
+      continue;
+    }
     if (result.success) {
       this->stat_tx_success_++;
     } else {
@@ -57,6 +61,11 @@ void Elero::loop() {
     this->dispatch_packet(pkt);
   }
 
+  if (this->diagnostic_reported_epoch_ != this->diagnostic_epoch_.load() && this->diagnostic_ready()) {
+    this->diagnostic_reported_epoch_ = this->diagnostic_epoch_.load();
+    this->log_diagnostics();
+  }
+
   uint32_t now = millis();
 
   // 3. Registry loop (state machines, command queues, adapter loops)
@@ -71,6 +80,8 @@ void Elero::loop() {
 
 // ─── decode_fifo_packets_: parse multiple packets from raw FIFO buffer ───────
 void Elero::decode_fifo_packets_(size_t fifo_count) {
+  this->stat_fifo_reads_.fetch_add(1, std::memory_order_relaxed);
+  this->stat_fifo_bytes_.fetch_add(fifo_count, std::memory_order_relaxed);
 #ifdef USE_ESP32
   int64_t drain_start_us = esp_timer_get_time();
 #endif
@@ -85,6 +96,12 @@ void Elero::decode_fifo_packets_(size_t fifo_count) {
   while (offset < fifo_count) {
     // Need at least PACKET_TOTAL_OVERHEAD bytes for the smallest valid packet
     if (offset + packet::PACKET_TOTAL_OVERHEAD > fifo_count) {
+      this->stat_rx_incomplete_.fetch_add(1, std::memory_order_relaxed);
+      this->stat_rx_tail_bytes_.fetch_add(fifo_count - offset, std::memory_order_relaxed);
+      ESP_LOGV(TAG_RF, "RX_TAIL t=%lu offset=%u have=%u raw=%s",
+               static_cast<unsigned long>(millis()), static_cast<unsigned>(offset),
+               static_cast<unsigned>(fifo_count - offset),
+               format_hex_pretty(this->msg_rx_ + offset, fifo_count - offset).c_str());
       break;
     }
 
@@ -93,13 +110,16 @@ void Elero::decode_fifo_packets_(size_t fifo_count) {
 
     // Incomplete packet at end of buffer
     if (offset + total > fifo_count) {
+      this->stat_rx_incomplete_.fetch_add(1, std::memory_order_relaxed);
+      this->stat_rx_tail_bytes_.fetch_add(fifo_count - offset, std::memory_order_relaxed);
       ESP_LOGV(TAG, "Incomplete packet at offset %d: need %d bytes, have %d",
                static_cast<int>(offset), static_cast<int>(total),
                static_cast<int>(fifo_count - offset));
       break;
     }
 
-    auto pkt = this->decode_packet(this->msg_rx_ + offset, fifo_count - offset);
+    this->stat_rx_frames_.fetch_add(1, std::memory_order_relaxed);
+    auto pkt = this->decode_packet(this->msg_rx_ + offset, total);
     if (pkt) {
 #ifdef USE_ESP32
       if (xQueueSend(this->rx_queue_handle_, &(*pkt), 0) != pdPASS) {
@@ -132,6 +152,7 @@ void IRAM_ATTR Elero::interrupt(Elero *arg) {
   if (arg->driver_ && arg->driver_->mode() == RadioMode::TX) {
     arg->tx_done_.store(true, std::memory_order_release);
   } else {
+    arg->stat_rx_irqs_.fetch_add(1, std::memory_order_relaxed);
     arg->rx_ready_.store(true, std::memory_order_release);
   }
 
@@ -262,6 +283,7 @@ void Elero::rf_task_func_(void *arg) {
     uint32_t now = millis();
 
     auto post_tx_done = [&](const TxResult &r) {
+      self->stat_tx_completed_.fetch_add(1, std::memory_order_relaxed);
       TxResult completed = r;
       completed.packet = tx_diagnostic(diagnostic_command, self->msg_tx_,
                                       self->msg_tx_[0] + 1, r.success, millis());
@@ -274,10 +296,24 @@ void Elero::rf_task_func_(void *arg) {
     if (!tx_in_progress) {
       RfTaskRequest req{};
       if (xQueueReceive(self->tx_queue_handle_, &req, 0) == pdPASS) {
+        const uint32_t epoch = self->diagnostic_epoch_.load();
+        const unsigned mode = epoch & 3U;
+        const bool allowed = req.diagnostic_epoch == epoch &&
+            (mode == 0 || (mode == 2 && req.type == RfTaskRequest::Type::TX && req.cmd.diagnostic));
+        if (!allowed) {
+          self->stat_tx_cancelled_.fetch_add(1, std::memory_order_relaxed);
+          // Preserve the sender's completion/cancellation contract. This result
+          // must never be logged as an actual transmission or motor response.
+          TxResult cancelled{req.client, false};
+          cancelled.cancelled = true;
+          if (xQueueSend(self->tx_done_queue_handle_, &cancelled, 0) != pdPASS)
+            ESP_LOGE(TAG_RF, "Diagnostic cancellation completion queue full");
+        } else {
         switch (req.type) {
           case RfTaskRequest::Type::TX:
             diagnostic_command = req.cmd;
             self->build_tx_packet_(req.cmd);
+            self->stat_tx_attempts_.fetch_add(1, std::memory_order_relaxed);
             if (self->driver_->load_and_transmit(self->msg_tx_, self->msg_tx_[0] + 1)) {
               self->tx_owner_ = req.client;
               tx_in_progress = true;
@@ -303,6 +339,7 @@ void Elero::rf_task_func_(void *arg) {
             self->freq0_.store(req.freq.f0);
             self->driver_->set_frequency_regs(req.freq.f2, req.freq.f1, req.freq.f0);
             break;
+        }
         }
       }
     }
@@ -347,6 +384,11 @@ void Elero::rf_task_func_(void *arg) {
       }
     }
 
+    // An in-flight frame may finish after a mode request. A window starts only
+    // after it finishes and older queued work has been cancelled.
+    if (!tx_in_progress && uxQueueMessagesWaiting(self->tx_queue_handle_) == 0)
+      self->diagnostic_applied_epoch_.store(self->diagnostic_epoch_.load());
+
     // 4. Radio health check (only when idle, throttled internally to every 5s)
     if (!tx_in_progress) {
       auto health = self->driver_->check_health();
@@ -382,9 +424,14 @@ void Elero::rf_task_func_(void *arg) {
 
 void Elero::reinit_frequency(uint8_t freq2, uint8_t freq1, uint8_t freq0) {
 #ifdef USE_ESP32
+  if (this->diagnostic_mode() != 0 || !this->diagnostic_ready()) {
+    ESP_LOGW(TAG_RF, "Frequency change blocked during diagnostic isolation");
+    return;
+  }
   // Post frequency change request to RF task (all SPI happens on Core 0)
   RfTaskRequest req{};
   req.type = RfTaskRequest::Type::REINIT_FREQ;
+  req.diagnostic_epoch = this->diagnostic_epoch_.load();
   req.freq = {freq2, freq1, freq0};
   if (xQueueSend(this->tx_queue_handle_, &req, 0) != pdPASS) {
     ESP_LOGW(TAG, "Frequency change failed: tx_queue full");
@@ -438,6 +485,7 @@ void Elero::build_tx_packet_(const EleroCommand &cmd) {
 
 bool Elero::request_tx(TxClient *client, const EleroCommand &cmd) {
 #ifdef USE_ESP32
+  if (!this->diagnostic_tx_allowed(cmd.diagnostic)) return false;
   ESP_LOGD(TAG_RF, "TX_REQUEST dst=0x%06lx src=0x%06lx ch=%u cmd=0x%02x type=0x%02x type2=0x%02x hop=0x%02x p1=0x%02x p2=0x%02x cnt=%u",
            static_cast<unsigned long>(cmd.dst_addr), static_cast<unsigned long>(cmd.src_addr),
            cmd.channel, cmd.payload[4], cmd.type, cmd.type2, cmd.hop,
@@ -448,6 +496,7 @@ bool Elero::request_tx(TxClient *client, const EleroCommand &cmd) {
   req.type = RfTaskRequest::Type::TX;
   req.cmd = cmd;
   req.client = client;
+  req.diagnostic_epoch = this->diagnostic_epoch_.load();
   return xQueueSend(this->tx_queue_handle_, &req, 0) == pdPASS;
 #else
   return false;
@@ -461,11 +510,13 @@ optional<RfPacketInfo> Elero::decode_packet(const uint8_t *buf, size_t buf_len) 
   // Use the existing pure parse_packet() function
   ParseResult r = parse_packet(buf, buf_len);
   if (!r.valid) {
+    this->stat_rx_rejected_.fetch_add(1, std::memory_order_relaxed);
     if (r.reject_reason) {
       ESP_LOGV(TAG, "Packet rejected: %s", r.reject_reason);
     }
     return {};
   }
+  if (!r.crc_ok) this->stat_rx_bad_crc_.fetch_add(1, std::memory_order_relaxed);
 
   // Extract fields relevant to this packet type
   bool is_cmd = is_command_packet(r.type);
@@ -516,6 +567,16 @@ void Elero::dispatch_packet(const RfPacketInfo &pkt) {
            static_cast<unsigned long>(pkt.timestamp_ms), pkt.channel, pkt.type2, pkt.hop,
            pkt.rssi, pkt.crc_ok, format_hex_pretty(pkt.raw, pkt.raw_len).c_str());
 
+  // Decode destination-list metadata on the main loop, not in the RF task.
+  const auto parsed = parse_packet(pkt.raw, pkt.raw_len);
+  if (parsed.valid) {
+    ESP_LOGV(TAG_RF, "RX_ROUTE t=%lu bwd=%06lx fwd=%06lx dest_count=%u dest_width=%u dests=%s",
+             static_cast<unsigned long>(pkt.timestamp_ms),
+             static_cast<unsigned long>(parsed.bwd_addr), static_cast<unsigned long>(parsed.fwd_addr),
+             parsed.num_dests, parsed.type > msg_type::ADDR_3BYTE_THRESHOLD ? 3 : 1,
+             format_hex_pretty(pkt.raw + pkt_offset::FIRST_DEST, parsed.dests_len).c_str());
+  }
+
   // Dispatch through unified device registry (state machines, adapters, observers)
   if (this->registry_ != nullptr) {
     this->registry_->on_rf_packet(pkt, pkt.timestamp_ms);
@@ -551,13 +612,9 @@ bool Elero::send_raw_command(uint32_t dst_addr, uint32_t src_addr, uint8_t chann
   cmd.payload[1] = payload_2;
   cmd.payload[4] = command;
 
-  // Fire-and-forget via RF task queue (no blocking, no completion callback)
-  RfTaskRequest req{};
-  req.type = RfTaskRequest::Type::TX;
-  req.cmd = cmd;
-  req.client = nullptr;  // No completion callback
-
-  if (xQueueSend(this->tx_queue_handle_, &req, 0) == pdPASS) {
+  // All raw requests go through the same isolation gate.
+  cmd.diagnostic = true;
+  if (this->request_tx(nullptr, cmd)) {
     ++raw_msg_cnt;
     if (raw_msg_cnt > packet::limits::COUNTER_MAX)
       raw_msg_cnt = 1;
@@ -567,6 +624,52 @@ bool Elero::send_raw_command(uint32_t dst_addr, uint32_t src_addr, uint8_t chann
 #else
   return false;
 #endif
+}
+
+bool Elero::diagnostic_ready() const {
+#ifdef USE_ESP32
+  return this->diagnostic_applied_epoch_.load() == this->diagnostic_epoch_.load() &&
+         this->tx_done_queue_handle_ != nullptr && uxQueueMessagesWaiting(this->tx_done_queue_handle_) == 0;
+#else
+  return false;
+#endif
+}
+
+bool Elero::diagnostic_tx_allowed(bool explicit_probe) const {
+  const int mode = this->diagnostic_mode();
+  return this->diagnostic_ready() && (mode == 0 || (mode == 2 && explicit_probe));
+}
+
+bool Elero::set_diagnostic_mode(int mode) {
+  if (mode < 0 || mode > 2) {
+    ESP_LOGW(TAG_RF, "Invalid diagnostic mode %d; expected 0, 1 or 2", mode);
+    return false;
+  }
+  const uint32_t epoch = ((this->diagnostic_epoch_.load() & ~3U) + 4U) | static_cast<uint32_t>(mode);
+  this->diagnostic_epoch_.store(epoch);
+  if (this->registry_ != nullptr) this->registry_->cancel_pending_for_diagnostics();
+  ESP_LOGI(TAG_RF, "DIAG_REQUEST t=%lu mode=%d epoch=%lu; waiting for in-flight TX",
+           static_cast<unsigned long>(millis()), mode, static_cast<unsigned long>(epoch >> 2));
+  return true;
+}
+
+void Elero::log_diagnostics() const {
+  ESP_LOGI(TAG_RF, "DIAG t=%lu mode=%d ready=%u epoch=%lu attempts=%lu completed=%lu cancelled=%lu",
+           static_cast<unsigned long>(millis()), this->diagnostic_mode(), this->diagnostic_ready(),
+           static_cast<unsigned long>(this->diagnostic_epoch_.load() >> 2),
+           static_cast<unsigned long>(this->stat_tx_attempts_.load()),
+           static_cast<unsigned long>(this->stat_tx_completed_.load()),
+           static_cast<unsigned long>(this->stat_tx_cancelled_.load()));
+  ESP_LOGI(TAG_RF, "DIAG_RX irq=%lu reads=%lu bytes=%lu frames=%lu incomplete=%lu tail_bytes=%lu rejected=%lu bad_crc=%lu queue_drop=%lu",
+           static_cast<unsigned long>(this->stat_rx_irqs_.load()),
+           static_cast<unsigned long>(this->stat_fifo_reads_.load()),
+           static_cast<unsigned long>(this->stat_fifo_bytes_.load()),
+           static_cast<unsigned long>(this->stat_rx_frames_.load()),
+           static_cast<unsigned long>(this->stat_rx_incomplete_.load()),
+           static_cast<unsigned long>(this->stat_rx_tail_bytes_.load()),
+           static_cast<unsigned long>(this->stat_rx_rejected_.load()),
+           static_cast<unsigned long>(this->stat_rx_bad_crc_.load()),
+           static_cast<unsigned long>(this->stat_rx_drops_.load()));
 }
 
 // ─── RF Stats Publishing ──────────────────────────────────────────────────────

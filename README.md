@@ -23,6 +23,16 @@ and `--dry-run` previews commands. An optional `baseline` object with `config`,
 `file` (saved OTA binary), and `sha256` enables `python scripts/dev.py rollback`
 without recompiling. Keep credentials in the private YAML/secrets files.
 
+The native diagnostic mode action accepts `0` (normal), `1` (listen-only),
+or `2` (explicit debug bursts only). Wait for `DIAG ... ready=1` in the
+ESPHome/HA log before measuring. Switching modes cancels pending work and
+lets any on-air frame finish; mode 1 blocks every TX path, and mode 2 suppresses
+polling and follow-up CHECKs. The debug action then sends exactly the requested
+burst using the existing wire format. Return to mode 0 after testing. Modes and
+counters live in RAM and reset on reboot. `DIAG_RX` reports FIFO fragments,
+parser rejections and queue drops; `RX_META`/`RX_ROUTE` preserve raw frames,
+destinations and ESP timestamps through the native API log subscription.
+
 Start with the [example configuration](configs/raffstore.yaml). Set your Wi-Fi and API/OTA credentials, motor and remote addresses, and channel.
 
 - `state_strategy: timed`: estimates remaining travel from position, direction and full travel duration, then adds `endpoint_margin`. Unknown positions use full travel time. RF endpoint feedback takes precedence.

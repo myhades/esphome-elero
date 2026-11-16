@@ -505,6 +505,7 @@ struct EleroCommand {
   // ── Group TX (0x44 multi-dest) ──
   uint8_t num_dests{0};                                    ///< 0 = single-dest (default), >1 = group
   uint8_t dest_channels[packet::GROUP_MAX_DESTS]{};        ///< Channel IDs for group TX
+  bool diagnostic{false};  ///< Explicit probe; never serialized onto the radio.
 };
 
 }  // namespace esphome::elero

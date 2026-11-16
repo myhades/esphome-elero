@@ -58,6 +58,7 @@ static EleroCommand cover_encoding(const NvsDeviceConfig &cfg, CoverAction actio
 bool DeviceRegistry::enqueue_or_warn_(Device &dev, uint8_t cmd_byte,
                                       uint8_t packets, uint8_t type,
                                       const char *context) {
+    if (hub_ && hub_->diagnostic_mode() != 0) return false;
     const bool queued = dev.is_cover() && needs_profile(dev.config) && cmd_byte != packet::command::INTERMEDIATE
         ? dev.sender.enqueue_encoded(cover_encoding(dev.config, semantic_action(cmd_byte)), packets)
         : dev.sender.enqueue(cmd_byte, packets, type);
@@ -75,6 +76,10 @@ bool DeviceRegistry::enqueue_or_warn_(Device &dev, uint8_t cmd_byte,
 
 bool DeviceRegistry::debug_send(Device &dev, int command, int type, int type2, int hop,
                                 int destination, int payload_1, int payload_2, int packets) {
+    if (!hub_ || !hub_->diagnostic_tx_allowed(true)) {
+        ESP_LOGW("elero.debug", "Diagnostic TX blocked: listen-only or mode transition");
+        return false;
+    }
     const auto byte = [](int value) { return value >= 0 && value <= 255; };
     if (!dev.active || !dev.is_cover() || !dev.config.is_enabled() ||
         !byte(command) || !byte(type2) || !byte(hop) || !byte(payload_1) || !byte(payload_2) ||
@@ -90,6 +95,7 @@ bool DeviceRegistry::debug_send(Device &dev, int command, int type, int type2, i
         return false;
     }
     EleroCommand encoding{};
+    encoding.diagnostic = true;
     encoding.src_addr = dev.config.src_address;
     encoding.dst_addr = static_cast<uint32_t>(destination);
     encoding.channel = dev.config.channel;
@@ -105,6 +111,18 @@ bool DeviceRegistry::debug_send(Device &dev, int command, int type, int type2, i
     ESP_LOGI("elero.debug", "Queued diagnostic burst cmd=0x%02x type=0x%02x packets=%d; configuration unchanged, motor acceptance unknown",
              command, type, packets);
     return true;
+}
+
+void DeviceRegistry::cancel_pending_for_diagnostics() {
+    const uint32_t now = millis();
+    for_each_active([&](Device &dev) {
+        dev.sender.clear_queue();
+        if (auto *cover = std::get_if<CoverDevice>(&dev.logic)) {
+            cover->target_position = cover_sm::NO_TARGET;
+            cover->poll.last_poll_ms = now;
+            cover->poll.awaiting_response = false;
+        }
+    });
 }
 
 bool DeviceRegistry::enqueue_check_(Device &dev, const char *context) {
@@ -430,6 +448,7 @@ Device *DeviceRegistry::find(uint32_t address) {
 // ═════════════════════════════════════════════════════════════════════════════
 
 void DeviceRegistry::command_cover(Device &dev, uint8_t cmd_byte) {
+    if (hub_ && hub_->diagnostic_mode() != 0) return;
     if (!dev.is_cover()) return;
 
     auto &cover = std::get<CoverDevice>(dev.logic);
@@ -469,6 +488,7 @@ void DeviceRegistry::command_cover(Device &dev, uint8_t cmd_byte) {
 }
 
 void DeviceRegistry::set_cover_position(Device &dev, float target) {
+    if (hub_ && hub_->diagnostic_mode() != 0) return;
     if (!dev.is_cover()) return;
 
     auto &cover = std::get<CoverDevice>(dev.logic);
@@ -509,6 +529,7 @@ void DeviceRegistry::set_cover_position(Device &dev, float target) {
 }
 
 void DeviceRegistry::command_cover_tilt(Device &dev) {
+    if (hub_ && hub_->diagnostic_mode() != 0) return;
     if (!dev.is_cover()) return;
 
     auto &cover = std::get<CoverDevice>(dev.logic);
@@ -533,6 +554,7 @@ void DeviceRegistry::command_cover_tilt(Device &dev) {
 }
 
 void DeviceRegistry::command_cover_tilt_step(Device &dev, bool up) {
+    if (hub_ && hub_->diagnostic_mode() != 0) return;
     if (!dev.is_cover() || !dev.config.supports_tilt) return;
     const auto encoding = cover_encoding(dev.config, up ? CoverAction::TILT_UP : CoverAction::TILT_DOWN);
     if (!dev.sender.enqueue_encoded(encoding, packet::button::PACKETS)) return;
@@ -545,6 +567,7 @@ void DeviceRegistry::command_cover_tilt_step(Device &dev, bool up) {
 }
 
 void DeviceRegistry::command_light(Device &dev, uint8_t cmd_byte) {
+    if (hub_ && hub_->diagnostic_mode() != 0) return;
     if (!dev.is_light()) return;
 
     auto &light = std::get<LightDevice>(dev.logic);
@@ -577,6 +600,7 @@ void DeviceRegistry::command_light(Device &dev, uint8_t cmd_byte) {
 }
 
 void DeviceRegistry::set_light_brightness(Device &dev, float brightness) {
+    if (hub_ && hub_->diagnostic_mode() != 0) return;
     if (!dev.is_light()) return;
 
     auto &light = std::get<LightDevice>(dev.logic);
@@ -620,6 +644,7 @@ void DeviceRegistry::set_light_brightness(Device &dev, float brightness) {
 }
 
 void DeviceRegistry::command_group(Device *const *devices, size_t count, uint8_t cmd_byte) {
+    if (hub_ && hub_->diagnostic_mode() != 0) return;
     if (count < 2 || count > packet::GROUP_MAX_DESTS || devices == nullptr) {
         ESP_LOGW(TAG, "command_group: invalid count %zu (need 2..%d)", count, packet::GROUP_MAX_DESTS);
         return;
@@ -1005,7 +1030,8 @@ void DeviceRegistry::loop_cover_(Device &dev, CoverDevice &cover, uint32_t now) 
     // 2. Poll if due — single packet suffices (blind is mains-powered, always
     //    listening). If missed, retry via normal poll interval.
     bool moving = cover_sm::is_moving(cover.state);
-    if (cover.poll.should_poll(now, moving)) {
+    const bool normal = !hub_ || hub_->diagnostic_mode() == 0;
+    if (normal && cover.poll.should_poll(now, moving)) {
         if (enqueue_check_(dev, "loop_cover(poll)")) {
             cover.poll.on_poll_sent(now);
         }
@@ -1013,7 +1039,7 @@ void DeviceRegistry::loop_cover_(Device &dev, CoverDevice &cover, uint32_t now) 
 
     // 3. Post-stop verification — after Stopping cooldown expires, verify the
     //    blind's actual resting position (frozen estimate may drift).
-    if (state_type_changed && was_stopping && std::holds_alternative<cover_sm::Idle>(cover.state)) {
+    if (normal && state_type_changed && was_stopping && std::holds_alternative<cover_sm::Idle>(cover.state)) {
         if (enqueue_check_(dev, "loop_cover(post_stop_check)")) {
             cover.poll.on_poll_sent(now);
         }
@@ -1021,7 +1047,7 @@ void DeviceRegistry::loop_cover_(Device &dev, CoverDevice &cover, uint32_t now) 
 
     // 4. Intermediate position stop — if cover has position tracking and
     //    has reached its target position, stop it.
-    if (moving && cover_sm::has_position_tracking(ctx) && cover.target_position >= cover_sm::POSITION_CLOSED) {
+    if (normal && moving && cover_sm::has_position_tracking(ctx) && cover.target_position >= cover_sm::POSITION_CLOSED) {
         float pos = cover_sm::position(cover.state, now, ctx);
         bool at_target = false;
         if (std::holds_alternative<cover_sm::Opening>(cover.state)) {

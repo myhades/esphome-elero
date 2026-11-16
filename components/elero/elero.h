@@ -81,6 +81,7 @@ inline RfPacketInfo tx_diagnostic(const EleroCommand &cmd, const uint8_t *raw,
 /// Uses a union to minimize queue item size (~50 bytes).
 struct RfTaskRequest {
   enum class Type : uint8_t { TX, REINIT_FREQ } type;
+  uint32_t diagnostic_epoch{0};
   TxClient *client{nullptr};  ///< TX: completion callback target (stable ptr on Device)
   union {
     EleroCommand cmd;                            ///< TX: command to transmit
@@ -95,6 +96,7 @@ struct TxResult {
   TxClient *client{nullptr};  ///< nullptr for fire-and-forget (raw TX)
   bool success{false};
   RfPacketInfo packet{};
+  bool cancelled{false};  ///< Discarded before touching the radio.
 };
 
 }  // namespace elero
@@ -169,6 +171,14 @@ class Elero : public Component {
   uint32_t diagnostic_fifo_overflows() const { return stat_fifo_overflows_.load(); }
   uint32_t diagnostic_watchdog_recoveries() const { return stat_watchdog_recoveries_.load(); }
 
+  // Runtime only: 0 normal, 1 listen-only, 2 explicit probes without polling.
+  // Wait for diagnostic_ready() before starting a measurement window.
+  bool set_diagnostic_mode(int mode);
+  int diagnostic_mode() const { return diagnostic_epoch_.load() & 3U; }
+  bool diagnostic_ready() const;
+  bool diagnostic_tx_allowed(bool explicit_probe) const;
+  void log_diagnostics() const;
+
 
   // Unified device registry
   void set_registry(DeviceRegistry *reg) { registry_ = reg; }
@@ -203,6 +213,10 @@ class Elero : public Component {
   std::atomic<uint8_t> freq0_{defaults::FREQ0};
   std::atomic<uint8_t> freq1_{defaults::FREQ1};
   std::atomic<uint8_t> freq2_{defaults::FREQ2};
+  // Low two bits hold mode; upper bits invalidate work from earlier windows.
+  std::atomic<uint32_t> diagnostic_epoch_{0};
+  std::atomic<uint32_t> diagnostic_applied_epoch_{0};
+  uint32_t diagnostic_reported_epoch_{0};  ///< Main loop only.
 
   // ─── Main loop-exclusive state ─────────────────────────────────────────────
   RadioDriver *driver_{nullptr};         ///< Radio hardware driver (CC1101, SX1262, etc.)
@@ -219,6 +233,17 @@ class Elero : public Component {
   std::atomic<uint32_t> stat_rx_drops_{0};
   std::atomic<uint32_t> stat_fifo_overflows_{0};
   std::atomic<uint32_t> stat_watchdog_recoveries_{0};
+  std::atomic<uint32_t> stat_tx_attempts_{0};
+  std::atomic<uint32_t> stat_tx_completed_{0};
+  std::atomic<uint32_t> stat_tx_cancelled_{0};
+  std::atomic<uint32_t> stat_rx_irqs_{0};
+  std::atomic<uint32_t> stat_fifo_reads_{0};
+  std::atomic<uint32_t> stat_fifo_bytes_{0};
+  std::atomic<uint32_t> stat_rx_frames_{0};
+  std::atomic<uint32_t> stat_rx_incomplete_{0};
+  std::atomic<uint32_t> stat_rx_tail_bytes_{0};
+  std::atomic<uint32_t> stat_rx_rejected_{0};
+  std::atomic<uint32_t> stat_rx_bad_crc_{0};
 
   // Core 1 only (incremented and read on main loop)
   uint32_t stat_tx_success_{0};
