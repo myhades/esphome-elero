@@ -1,0 +1,26 @@
+[
+  {
+    "name": "down-relay-11",
+    "action": "down",
+    "note": "2026-11-16 successful remote-operation capture. Addresses anonymised; wire flags, counter and payload preserved. Original direct frame was not captured.",
+    "raw": "1db469111a0111100001300002100001012000010001676861a35b5810af05ff"
+  },
+  {
+    "name": "up-relay-11",
+    "action": "up",
+    "note": "2026-11-16 successful remote-operation capture. Addresses anonymised; wire flags, counter and payload preserved. Original direct frame was not captured.",
+    "raw": "1dbd69111a011110000130000110000101200001000131de8b320184b53c1eff"
+  },
+  {
+    "name": "up-relay-10",
+    "action": "up",
+    "note": "2026-11-16 successful remote-operation capture. Addresses anonymised; wire flags, counter and payload preserved. Original direct frame was not captured.",
+    "raw": "1dbd69101a011110000130000310000101200001000131de8b320184b53cffff"
+  },
+  {
+    "name": "stop-relay-10",
+    "action": "stop",
+    "note": "2026-11-16 successful remote-operation capture. Addresses anonymised; wire flags, counter and payload preserved. Original direct frame was not captured.",
+    "raw": "1dc069101a0111100001300003100001012000010001edc70bed2dcbe720feff"
+  }
+]

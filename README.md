@@ -22,4 +22,6 @@ Start with the [example configuration](configs/raffstore.yaml). Set your Wi-Fi a
 - Configure RSSI under `sensor` and the status-query button under `button`, using `platform: elero` and `cover_id` to select the cover.
 - Under `text_sensor`, expose `rf_state`, `position_source` and `transition_reason` separately. Use the [HA template](configs/ha-rssi-attributes.yaml) to combine them as RSSI attributes.
 
-YAML is authoritative; legacy NVS data is preserved. Up, down and STOP have been confirmed on the user's motor; tilt remains unverified.
+Omitting `commands` selects this fork's installed MonoTel 2 profile: UP `0x21`, DOWN `0x41` and STOP `0x10` use `0x69`, payload `00 01`, and `command_address`. CHECK keeps `0x6A`, payload `00 04`, and `status_address`. Explicit `commands` remain available for diagnostic overrides.
+
+The profile comes from relayed packets captured during successful remote operation. Origin routing uses `type2: 0x10`, `hop: 0x0A` and the configured remote as source/backward/forward address; this reconstruction still needs motor acceptance verification. Counters and encoding seeds are generated, rather than replayed. Polling, timing and NVS behavior are unchanged. YAML is authoritative; legacy NVS data is preserved.
