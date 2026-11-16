@@ -266,7 +266,7 @@ class DeviceRegistry {
     [[nodiscard]] bool enqueue_or_warn_(Device &dev, uint8_t cmd_byte,
                                         uint8_t packets, uint8_t type,
                                         const char *context);
-    [[nodiscard]] bool enqueue_check_(Device &dev, const char *context);
+    [[nodiscard]] bool enqueue_check_(Device &dev, const char *context, bool explicit_request = false);
 
     /// Process cover device loop (polling, timeouts, position, command queue).
     void loop_cover_(Device &dev, CoverDevice &cover, uint32_t now);

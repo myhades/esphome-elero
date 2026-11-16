@@ -92,7 +92,8 @@ cover:
     commands:
       up: {command: 0x21, type: 0x44, type2: 0x10, hop: 0x00}
       down: {command: 0x41, type: 0x44, type2: 0x10, hop: 0x00}
-      stop: {command: 0x10, type: 0x6A, destination: status}
+      # This motor stops on CHECK. STOP sends that same frame once.
+      stop: {command: 0x00, type: 0x6A, destination: status}
       check: {command: 0x00, type: 0x6A, destination: status}
 
 sensor:

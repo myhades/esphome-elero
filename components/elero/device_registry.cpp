@@ -125,7 +125,11 @@ void DeviceRegistry::cancel_pending_for_diagnostics() {
     });
 }
 
-bool DeviceRegistry::enqueue_check_(Device &dev, const char *context) {
+bool DeviceRegistry::enqueue_check_(Device &dev, const char *context, bool explicit_request) {
+    // On this Raffstore the CHECK frame stops travel. Never send it as an
+    // automatic follow-up, boot/idle poll or post-stop verification. A missed
+    // remote movement packet also makes an apparently idle poll unsafe.
+    if (dev.is_cover() && dev.config.command_profile == 1 && !explicit_request) return false;
     bool queued = enqueue_or_warn_(dev, packet::command::CHECK,
                                    packet::limits::CHECK_PACKETS,
                                    packet::msg_type::COMMAND, context);
@@ -462,7 +466,8 @@ void DeviceRegistry::command_cover(Device &dev, uint8_t cmd_byte) {
 
     if (cmd_byte == packet::command::STOP) {
         dev.sender.clear_queue();
-        if (!enqueue_or_warn_(dev, cmd_byte, packet::button::PACKETS,
+        const uint8_t packets = dev.config.command_profile == 1 ? 1 : packet::button::PACKETS;
+        if (!enqueue_or_warn_(dev, cmd_byte, packets,
                               packet::msg_type::COMMAND, "command_cover(stop)")) return;
         (void) enqueue_check_(dev, "command_cover(stop)");
         cover.state = cover_sm::on_command(cover.state, cmd_byte, now, ctx);
@@ -836,7 +841,7 @@ bool DeviceRegistry::command_saved_group(const char *id, uint8_t cmd_byte, std::
 
 void DeviceRegistry::request_check(Device &dev) {
     if (!dev.active) return;
-    bool queued = enqueue_check_(dev, "request_check");
+    bool queued = enqueue_check_(dev, "request_check", true);
     if (queued && dev.is_cover()) {
         auto &cover = std::get<CoverDevice>(dev.logic);
         cover.poll.on_poll_sent(millis());
@@ -1027,11 +1032,11 @@ void DeviceRegistry::loop_cover_(Device &dev, CoverDevice &cover, uint32_t now) 
         } else cover.transition_reason = was_stopping ? "stop_cooldown" : "movement_timeout";
     }
 
-    // 2. Poll if due — single packet suffices (blind is mains-powered, always
-    //    listening). If missed, retry via normal poll interval.
+    // 2. Only profiles with a non-disruptive query can poll automatically.
     bool moving = cover_sm::is_moving(cover.state);
     const bool normal = !hub_ || hub_->diagnostic_mode() == 0;
-    if (normal && cover.poll.should_poll(now, moving)) {
+    const bool auto_checks = dev.config.command_profile != 1;
+    if (normal && auto_checks && cover.poll.should_poll(now, moving)) {
         if (enqueue_check_(dev, "loop_cover(poll)")) {
             cover.poll.on_poll_sent(now);
         }
@@ -1039,7 +1044,7 @@ void DeviceRegistry::loop_cover_(Device &dev, CoverDevice &cover, uint32_t now) 
 
     // 3. Post-stop verification — after Stopping cooldown expires, verify the
     //    blind's actual resting position (frozen estimate may drift).
-    if (normal && state_type_changed && was_stopping && std::holds_alternative<cover_sm::Idle>(cover.state)) {
+    if (normal && auto_checks && state_type_changed && was_stopping && std::holds_alternative<cover_sm::Idle>(cover.state)) {
         if (enqueue_check_(dev, "loop_cover(post_stop_check)")) {
             cover.poll.on_poll_sent(now);
         }
@@ -1059,7 +1064,7 @@ void DeviceRegistry::loop_cover_(Device &dev, CoverDevice &cover, uint32_t now) 
         if (at_target && cover.target_position > cover_sm::POSITION_CLOSED && cover.target_position < cover_sm::POSITION_OPEN) {
             dev.sender.clear_queue();
             (void) enqueue_or_warn_(dev, packet::command::STOP,
-                                    packet::button::PACKETS,
+                                    dev.config.command_profile == 1 ? 1 : packet::button::PACKETS,
                                     packet::msg_type::COMMAND,
                                     "loop_cover(target_stop)");
             (void) enqueue_check_(dev, "loop_cover(target_stop)");
