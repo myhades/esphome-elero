@@ -33,13 +33,6 @@ counters live in RAM and reset on reboot. `DIAG_RX` reports FIFO fragments,
 parser rejections and queue drops; `RX_META`/`RX_ROUTE` preserve raw frames,
 destinations and ESP timestamps through the native API log subscription.
 
-`TX_HW` adds the FIFO count after loading, full TXBYTES error bits, TX/end/RX
-states, PLL calibration value and microsecond timestamps. `proof=1` identifies
-the GDO interrupt completion path; `proof=2` identifies the state-polling fallback.
-`0xff` register fields were not sampled. `RF_BOOT_CONFIG` is cached register and
-PA-table readback from boot. These records use RAM and the existing API log;
-they cannot establish the power, frequency or bytes actually received over the air.
-
 Start with the [example configuration](configs/raffstore.yaml). Set your Wi-Fi and API/OTA credentials, motor and remote addresses, and channel.
 
 - `state_strategy: timed`: estimates remaining travel from position, direction and full travel duration, then adds `endpoint_margin`. Unknown positions use full travel time. RF endpoint feedback takes precedence.

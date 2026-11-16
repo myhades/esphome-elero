@@ -50,9 +50,6 @@ bool CC1101Driver::init() {
   }
 
   this->init_registers();
-  // Boot readback is immutable once the RF task starts; dump_config uses the cache.
-  this->read_buf(0, this->boot_registers_, sizeof(this->boot_registers_));
-  this->read_buf(CC1101_PATABLE, this->boot_pa_, sizeof(this->boot_pa_));
   return true;
 }
 
@@ -80,8 +77,6 @@ bool CC1101Driver::load_and_transmit(const uint8_t *pkt_buf, size_t len) {
 
   memcpy(this->tx_buf_, pkt_buf, len);
   this->tx_len_ = len;
-  this->tx_trace_ = {};
-  this->tx_trace_.length = static_cast<uint8_t>(len);
 
   ESP_LOGVV(TAG, "load_and_transmit: %d data bytes", this->tx_buf_[0]);
   uint32_t now = millis();
@@ -225,9 +220,6 @@ void CC1101Driver::dump_config() {
   ESP_LOGCONFIG(TAG, "  Radio: CC1101");
   ESP_LOGCONFIG(TAG, "  freq2: 0x%02x, freq1: 0x%02x, freq0: 0x%02x",
                 this->freq2_, this->freq1_, this->freq0_);
-  ESP_LOGCONFIG(TAG, "  RF_BOOT_CONFIG regs00_2e=%s pa=%s",
-                format_hex_pretty(this->boot_registers_, sizeof(this->boot_registers_)).c_str(),
-                format_hex_pretty(this->boot_pa_, sizeof(this->boot_pa_)).c_str());
 }
 
 // ─── Boot Diagnostics ────────────────────────────────────────────────────
@@ -267,7 +259,7 @@ void CC1101Driver::init_registers() {
   // PA table: +10 dBm output power for all 8 power levels
   uint8_t patable_data[] = {0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0};
 
-  // Elero 2-FSK configuration: about 76.8 kBaud with the 26 MHz crystal.
+  // CC1101 register configuration for Elero protocol (868 MHz, 2-FSK, 9.6 kBaud).
   // Values derived from TI SmartRF Studio and Elero protocol reverse-engineering.
   // Reference: https://github.com/QuadCorei8085/elero_protocol
   (void) this->write_reg(CC1101_FSCTRL1, 0x08);
@@ -310,7 +302,6 @@ void CC1101Driver::init_registers() {
 
   (void) this->write_cmd(CC1101_SRX);
   (void) this->wait_rx();
-
 }
 
 // ─── TX State Machine ─────────────────────────────────────────────────────
@@ -342,13 +333,11 @@ bool CC1101Driver::tx_prepare_for_fsm() {
     ESP_LOGW(TAG, "Prepare: FIFO write failed");
     return false;
   }
-  this->tx_trace_.loaded = this->read_status_reliable_(CC1101_TXBYTES);
 
   if (this->tx_done_ != nullptr) {
     this->tx_done_->store(false, std::memory_order_release);
   }
 
-  this->tx_trace_.stx_us = micros();
   (void) this->write_cmd(CC1101_STX);
   return true;
 }
@@ -358,10 +347,7 @@ Cc1101TxPhaseResult CC1101Driver::tx_wait_started_for_fsm() {
     esp_rom_delay_us(50);
     uint8_t marcstate =
         this->read_status(CC1101_MARCSTATE) & packet::cc1101_status::MARCSTATE_MASK;
-    this->tx_trace_.start_marc = marcstate;
     if (marcstate == CC1101_MARCSTATE_TX) {
-      this->tx_trace_.started_us = micros();
-      this->tx_trace_.fscal1 = this->read_reg(CC1101_FSCAL1);
       return Cc1101TxPhaseResult::Succeeded;
     }
   }
@@ -373,9 +359,7 @@ Cc1101TxPhaseResult CC1101Driver::tx_wait_started_for_fsm() {
 }
 
 Cc1101TxPhaseResult CC1101Driver::tx_wait_done_for_fsm() {
-  const auto result = this->tx_check_done_result_();
-  if (result != TxDoneCheckResult::Pending) this->tx_trace_.done_us = micros();
-  switch (result) {
+  switch (this->tx_check_done_result_()) {
     case TxDoneCheckResult::Pending:
       return Cc1101TxPhaseResult::Pending;
     case TxDoneCheckResult::Succeeded:
@@ -390,11 +374,9 @@ Cc1101TxPhaseResult CC1101Driver::tx_wait_done_for_fsm() {
 CC1101Driver::TxDoneCheckResult CC1101Driver::tx_check_done_result_() {
   bool irq_fired = this->tx_done_ != nullptr && this->tx_done_->load(std::memory_order_acquire);
   if (irq_fired) {
-    this->tx_trace_.proof = 1;
     esp_rom_delay_us(50);
-    this->tx_trace_.end_txbytes = this->read_status_reliable_(CC1101_TXBYTES);
-    this->tx_trace_.end_marc = this->read_status_reliable_(CC1101_MARCSTATE) & packet::cc1101_status::MARCSTATE_MASK;
-    uint8_t txbytes = this->tx_trace_.end_txbytes & packet::cc1101_status::BYTE_COUNT_MASK;
+    uint8_t txbytes =
+        this->read_status_reliable_(CC1101_TXBYTES) & packet::cc1101_status::BYTE_COUNT_MASK;
     if (txbytes == 0) {
       ESP_LOGV(TAG, "TX successful");
       return TxDoneCheckResult::Succeeded;
@@ -403,8 +385,8 @@ CC1101Driver::TxDoneCheckResult CC1101Driver::tx_check_done_result_() {
     if (this->tx_verify_retry_count_ == 0) {
       ++this->tx_verify_retry_count_;
       esp_rom_delay_us(100);
-      this->tx_trace_.end_txbytes = this->read_status_reliable_(CC1101_TXBYTES);
-      txbytes = this->tx_trace_.end_txbytes & packet::cc1101_status::BYTE_COUNT_MASK;
+      txbytes = this->read_status_reliable_(CC1101_TXBYTES) &
+                packet::cc1101_status::BYTE_COUNT_MASK;
       if (txbytes == 0) {
         ESP_LOGV(TAG, "TX successful (after grace)");
         return TxDoneCheckResult::Succeeded;
@@ -416,11 +398,9 @@ CC1101Driver::TxDoneCheckResult CC1101Driver::tx_check_done_result_() {
   }
 
   uint8_t marcstate = this->read_status(CC1101_MARCSTATE) & packet::cc1101_status::MARCSTATE_MASK;
-  this->tx_trace_.end_marc = marcstate;
   if (marcstate == CC1101_MARCSTATE_IDLE || marcstate == CC1101_MARCSTATE_RX) {
-    this->tx_trace_.proof = 2;
-    this->tx_trace_.end_txbytes = this->read_status_reliable_(CC1101_TXBYTES);
-    uint8_t txbytes = this->tx_trace_.end_txbytes & packet::cc1101_status::BYTE_COUNT_MASK;
+    uint8_t txbytes =
+        this->read_status_reliable_(CC1101_TXBYTES) & packet::cc1101_status::BYTE_COUNT_MASK;
     if (txbytes == 0) {
       ESP_LOGV(TAG, "TX successful (MARCSTATE fallback)");
       return TxDoneCheckResult::Succeeded;
@@ -439,12 +419,10 @@ Cc1101TxPhaseResult CC1101Driver::tx_return_to_rx_for_fsm() {
   uint32_t elapsed = millis() - this->tx_state_enter_time_;
   uint8_t marcstate =
       this->read_status(CC1101_MARCSTATE) & packet::cc1101_status::MARCSTATE_MASK;
-  this->tx_trace_.rx_marc = marcstate;
   if (marcstate == CC1101_MARCSTATE_IDLE) {
     (void) this->write_cmd(CC1101_SRX);
     esp_rom_delay_us(100);
     marcstate = this->read_status(CC1101_MARCSTATE) & packet::cc1101_status::MARCSTATE_MASK;
-    this->tx_trace_.rx_marc = marcstate;
   }
 
   if (marcstate != CC1101_MARCSTATE_RX) {
@@ -471,7 +449,6 @@ Cc1101TxPhaseResult CC1101Driver::tx_return_to_rx_for_fsm() {
   }
 
   marcstate = this->read_status(CC1101_MARCSTATE) & packet::cc1101_status::MARCSTATE_MASK;
-  this->tx_trace_.rx_marc = marcstate;
   if (marcstate != CC1101_MARCSTATE_RX) {
     if (marcstate_is_transient(marcstate) && elapsed <= RX_READY_TIMEOUT_MS) {
       ESP_LOGD(TAG, "ReturnToRx: waiting for RX restore MARCSTATE=0x%02x after %ums",
@@ -685,7 +662,6 @@ uint8_t CC1101Driver::read_status_reliable_(uint8_t addr) {
     a = this->read_status(addr);
     b = this->read_status(addr);
   } while (a != b && ++tries < 10);
-  if (a != b && this->tx_trace_.unstable_reads != 0xff) ++this->tx_trace_.unstable_reads;
   return a;
 }
 

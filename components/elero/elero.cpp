@@ -48,12 +48,6 @@ void Elero::loop() {
     ESP_LOGD(TAG_RF, "TX_RESULT t=%lu radio_success=%u raw=%s",
              static_cast<unsigned long>(result.packet.timestamp_ms), result.success,
              format_hex_pretty(result.packet.raw, result.packet.raw_len).c_str());
-    const auto &hw = result.trace;
-    ESP_LOGD(TAG_RF, "TX_HW cnt=%u cmd=0x%02x len=%u loaded=0x%02x end_bytes=0x%02x marc=0x%02x/0x%02x/0x%02x proof=%u fscal1=0x%02x stx_us=%lu start_us=%lu done_us=%lu unstable=%u",
-             result.packet.cnt, result.packet.command, hw.length, hw.loaded, hw.end_txbytes,
-             hw.start_marc, hw.end_marc, hw.rx_marc, hw.proof, hw.fscal1,
-             static_cast<unsigned long>(hw.stx_us), static_cast<unsigned long>(hw.started_us),
-             static_cast<unsigned long>(hw.done_us), hw.unstable_reads);
     if (this->registry_ != nullptr)
       this->registry_->on_rf_packet(result.packet, result.packet.timestamp_ms);
     if (result.client != nullptr) {
@@ -293,7 +287,6 @@ void Elero::rf_task_func_(void *arg) {
       TxResult completed = r;
       completed.packet = tx_diagnostic(diagnostic_command, self->msg_tx_,
                                       self->msg_tx_[0] + 1, r.success, millis());
-      completed.trace = self->driver_->last_tx_trace();
       if (xQueueSend(self->tx_done_queue_handle_, &completed, 0) != pdPASS) {
         ESP_LOGE(TAG, "tx_done_queue full, dropping TX completion");
       }
