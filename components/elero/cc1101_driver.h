@@ -54,6 +54,7 @@ class CC1101Driver : public RadioDriver,
 
   bool load_and_transmit(const uint8_t *pkt_buf, size_t len) override;
   TxPollResult poll_tx() override;
+  RadioTxTrace last_tx_trace() const override { return tx_trace_; }
   void abort_tx() override;
 
   bool has_data() override;
@@ -128,6 +129,9 @@ class CC1101Driver : public RadioDriver,
   [[nodiscard]] TxDoneCheckResult tx_check_done_result_();
 
   Cc1101TxFsm tx_fsm_;
+  RadioTxTrace tx_trace_{};
+  uint8_t boot_registers_[CC1101_TEST0 + 1]{};
+  uint8_t boot_pa_[8]{};
   Cc1101TxTerminalResult tx_terminal_result_{Cc1101TxTerminalResult::None};
   uint32_t tx_state_enter_time_{0};
   uint8_t tx_verify_retry_count_{0};

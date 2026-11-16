@@ -97,6 +97,7 @@ struct TxResult {
   bool success{false};
   RfPacketInfo packet{};
   bool cancelled{false};  ///< Discarded before touching the radio.
+  RadioTxTrace trace{};
 };
 
 }  // namespace elero

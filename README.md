@@ -33,6 +33,13 @@ counters live in RAM and reset on reboot. `DIAG_RX` reports FIFO fragments,
 parser rejections and queue drops; `RX_META`/`RX_ROUTE` preserve raw frames,
 destinations and ESP timestamps through the native API log subscription.
 
+`TX_HW` adds the FIFO count after loading, full TXBYTES error bits, TX/end/RX
+states, PLL calibration value and microsecond timestamps. `proof=1` identifies
+the GDO interrupt completion path; `proof=2` identifies the state-polling fallback.
+`0xff` register fields were not sampled. `RF_BOOT_CONFIG` is cached register and
+PA-table readback from boot. These records use RAM and the existing API log;
+they cannot establish the power, frequency or bytes actually received over the air.
+
 Start with the [example configuration](configs/raffstore.yaml). Set your Wi-Fi and API/OTA credentials, motor and remote addresses, and channel.
 
 - `state_strategy: timed`: estimates remaining travel from position, direction and full travel duration, then adds `endpoint_margin`. Unknown positions use full travel time. RF endpoint feedback takes precedence.
@@ -43,4 +50,4 @@ Start with the [example configuration](configs/raffstore.yaml). Set your Wi-Fi a
 - Up, down and STOP use three-frame `0x44` bursts (commands `0x21`, `0x41` and `0x10`, type2 `0x10`, hop `0x00`). An isolated UP followed by this STOP after eight seconds stopped the blind at the expected time. The earlier CHECK-as-STOP trial failed to stop reliably; CHECK's effect on motion remains unresolved. Automatic queries stay disabled, including startup, idle, movement and command follow-ups. The explicit query button and receive logging remain available.
 - Under `text_sensor`, expose `rf_state`, `position_source` and `transition_reason` separately. Use the [HA template](configs/ha-rssi-attributes.yaml) to combine them as RSSI attributes.
 
-YAML is authoritative; legacy NVS data is preserved. Movement and the isolated STOP have worked on the user's motor. Repeated control and long-term reliability still need validation; tilt remains unverified.
+YAML is authoritative; legacy NVS data is preserved. Movement and the isolated STOP have worked on the user's motor, but a subsequent UP/STOP/DOWN/STOP sequence failed to move down. Control remains unreliable; tilt remains unverified.

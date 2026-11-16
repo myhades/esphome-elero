@@ -28,6 +28,23 @@ enum class TxPollResult : uint8_t {
   FAILED,   ///< TX failed (timeout, hardware error)
 };
 
+// One bounded RAM snapshot per transmission; copied to the main-loop log queue.
+// These are chip-side observations, not a measurement of radiated RF or a motor ACK.
+struct RadioTxTrace {
+  uint32_t stx_us{0};
+  uint32_t started_us{0};
+  uint32_t done_us{0};
+  uint8_t length{0};
+  uint8_t loaded{0xff};
+  uint8_t end_txbytes{0xff};  // Full register, including TXFIFO_UNDERFLOW.
+  uint8_t start_marc{0xff};
+  uint8_t end_marc{0xff};
+  uint8_t rx_marc{0xff};
+  uint8_t fscal1{0xff};
+  uint8_t proof{0};          // 0: none, 1: GDO interrupt path, 2: MARCSTATE fallback.
+  uint8_t unstable_reads{0}; // Bounded stable-read loop exhausted.
+};
+
 /// Radio health status from periodic watchdog check.
 enum class RadioHealth : uint8_t {
   OK,             ///< Radio in expected RX state
@@ -84,6 +101,9 @@ class RadioDriver {
   /// Must be called repeatedly after load_and_transmit() returns true.
   /// @return PENDING while transmitting, SUCCESS or FAILED when done
   virtual TxPollResult poll_tx() = 0;
+
+  // Called from the RF task immediately after completion, before another TX starts.
+  virtual RadioTxTrace last_tx_trace() const { return {}; }
 
   /// Abort an in-progress TX and recover the radio to RX.
   virtual void abort_tx() = 0;
