@@ -73,6 +73,13 @@ bool DeviceRegistry::enqueue_or_warn_(Device &dev, uint8_t cmd_byte,
     return false;
 }
 
+bool DeviceRegistry::debug_action(Device &dev, CoverAction action) {
+    if (action > CoverAction::TILT_DOWN) return false;
+    const auto cmd = cover_encoding(dev.config, action);
+    return debug_send(dev, cmd.payload[4], cmd.type, cmd.type2, cmd.hop,
+                      cmd.dst_addr, cmd.payload[0], cmd.payload[1], packet::button::PACKETS);
+}
+
 bool DeviceRegistry::debug_send(Device &dev, int command, int type, int type2, int hop,
                                 int destination, int payload_1, int payload_2, int packets) {
     const auto byte = [](int value) { return value >= 0 && value <= 255; };

@@ -20,6 +20,7 @@ Start with the [example configuration](configs/raffstore.yaml). Set your Wi-Fi a
 - HA uses 100% for fully open and 0% for fully closed. Intermediate positions are time estimates. Unknown startup position displays a 50% placeholder.
 - Omit `tilt` and both tilt commands when unused. To enable it, set `tilt: true`, configure `commands.tilt_up/tilt_down`, and add buttons with `action: tilt_up/tilt_down`.
 - Configure RSSI under `sensor` and the status-query button under `button`, using `platform: elero` and `cover_id` to select the cover.
+- Five diagnostic buttons use `action: short_up`, `long_up`, `short_down`, `long_down`, and `stop`. Each sends one three-packet burst through the current backend command profile. They do not start a timed sequence or add an immediate CHECK; STOP clears pending commands. The example exposes all five in Home Assistant.
 - Under `text_sensor`, expose `rf_state`, `position_source` and `transition_reason` separately. Use the [HA template](configs/ha-rssi-attributes.yaml) to combine them as RSSI attributes.
 
 Omitting `commands` selects this fork's installed MonoTel 2 profile: UP `0x21`, DOWN `0x41` and STOP `0x10` use `0x69`, payload `00 01`, and `command_address`. CHECK keeps `0x6A`, payload `00 04`, and `status_address`. Explicit `commands` remain available for diagnostic overrides.

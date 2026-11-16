@@ -132,6 +132,7 @@ class DeviceRegistry {
     // Does not change YAML/NVS configuration or infer motor movement from TX.
     bool debug_send(Device &dev, int command, int type, int type2, int hop,
                     int destination, int payload_1, int payload_2, int packets);
+    bool debug_action(Device &dev, CoverAction action);
 
     // ═════════════════════════════════════════════════════════════════════════
     // RF DISPATCH

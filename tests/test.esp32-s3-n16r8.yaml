@@ -97,6 +97,31 @@ sensor:
 button:
   - platform: elero
     cover_id: raffstore
+    action: short_up
+    name: Short Up
+    icon: mdi:arrow-up
+  - platform: elero
+    cover_id: raffstore
+    action: long_up
+    name: Long Up
+    icon: mdi:arrow-up-bold
+  - platform: elero
+    cover_id: raffstore
+    action: short_down
+    name: Short Down
+    icon: mdi:arrow-down
+  - platform: elero
+    cover_id: raffstore
+    action: long_down
+    name: Long Down
+    icon: mdi:arrow-down-bold
+  - platform: elero
+    cover_id: raffstore
+    action: stop
+    name: Stop
+    icon: mdi:stop
+  - platform: elero
+    cover_id: raffstore
     name: "查询状态"
 
 text_sensor:

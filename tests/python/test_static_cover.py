@@ -45,7 +45,10 @@ def test_complete_native_codegen(tmp_path):
     assert "mongoose" not in source
     assert "elero_web" not in source
     assert "TiltStepButton(" not in source
-    assert source.count("App.register_button(") == 1
+    assert source.count("App.register_button(") == 6
+    assert source.count(" elero::DebugCommandButton(raffstore, ") == 5
+    for action in ("TILT_UP", "UP", "TILT_DOWN", "DOWN", "STOP"):
+        assert f"elero::CoverAction::{action})" in source
     assert "set_refresh_button(" in source
     assert "set_rssi_sensor(" in source
     assert "set_position_source_sensor(" in source
