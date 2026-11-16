@@ -126,9 +126,8 @@ void DeviceRegistry::cancel_pending_for_diagnostics() {
 }
 
 bool DeviceRegistry::enqueue_check_(Device &dev, const char *context, bool explicit_request) {
-    // On this Raffstore the CHECK frame stops travel. Never send it as an
-    // automatic follow-up, boot/idle poll or post-stop verification. A missed
-    // remote movement packet also makes an apparently idle poll unsafe.
+    // Keep Raffstore queries explicit while their effect on motion is unresolved.
+    // A missed remote movement packet can also make an idle poll overlap travel.
     if (dev.is_cover() && dev.config.command_profile == 1 && !explicit_request) return false;
     bool queued = enqueue_or_warn_(dev, packet::command::CHECK,
                                    packet::limits::CHECK_PACKETS,
@@ -466,8 +465,7 @@ void DeviceRegistry::command_cover(Device &dev, uint8_t cmd_byte) {
 
     if (cmd_byte == packet::command::STOP) {
         dev.sender.clear_queue();
-        const uint8_t packets = dev.config.command_profile == 1 ? 1 : packet::button::PACKETS;
-        if (!enqueue_or_warn_(dev, cmd_byte, packets,
+        if (!enqueue_or_warn_(dev, cmd_byte, packet::button::PACKETS,
                               packet::msg_type::COMMAND, "command_cover(stop)")) return;
         (void) enqueue_check_(dev, "command_cover(stop)");
         cover.state = cover_sm::on_command(cover.state, cmd_byte, now, ctx);
@@ -1032,7 +1030,7 @@ void DeviceRegistry::loop_cover_(Device &dev, CoverDevice &cover, uint32_t now) 
         } else cover.transition_reason = was_stopping ? "stop_cooldown" : "movement_timeout";
     }
 
-    // 2. Only profiles with a non-disruptive query can poll automatically.
+    // 2. Raffstore queries remain manual until their motion behavior is verified.
     bool moving = cover_sm::is_moving(cover.state);
     const bool normal = !hub_ || hub_->diagnostic_mode() == 0;
     const bool auto_checks = dev.config.command_profile != 1;
@@ -1064,7 +1062,7 @@ void DeviceRegistry::loop_cover_(Device &dev, CoverDevice &cover, uint32_t now) 
         if (at_target && cover.target_position > cover_sm::POSITION_CLOSED && cover.target_position < cover_sm::POSITION_OPEN) {
             dev.sender.clear_queue();
             (void) enqueue_or_warn_(dev, packet::command::STOP,
-                                    dev.config.command_profile == 1 ? 1 : packet::button::PACKETS,
+                                    packet::button::PACKETS,
                                     packet::msg_type::COMMAND,
                                     "loop_cover(target_stop)");
             (void) enqueue_check_(dev, "loop_cover(target_stop)");

@@ -40,7 +40,7 @@ Start with the [example configuration](configs/raffstore.yaml). Set your Wi-Fi a
 - HA uses 100% for fully open and 0% for fully closed. Intermediate positions are time estimates. Unknown startup position displays a 50% placeholder.
 - Omit `tilt` and both tilt commands when unused. To enable it, set `tilt: true`, configure `commands.tilt_up/tilt_down`, and add buttons with `action: tilt_up/tilt_down`.
 - Configure RSSI under `sensor` and the status-query button under `button`, using `platform: elero` and `cover_id` to select the cover.
-- This Raffstore stops when it receives CHECK (`0x6A`, command `0x00`). Automatic queries are disabled, including startup, idle, movement and command follow-ups. STOP uses the tested CHECK framing once; up/down keep their three-frame bursts. The explicit query button remains available and can stop travel. Receive logging stays active without polling.
+- Up, down and STOP use three-frame `0x44` bursts (commands `0x21`, `0x41` and `0x10`, type2 `0x10`, hop `0x00`). An isolated UP followed by this STOP after eight seconds stopped the blind at the expected time. The earlier CHECK-as-STOP trial failed to stop reliably; CHECK's effect on motion remains unresolved. Automatic queries stay disabled, including startup, idle, movement and command follow-ups. The explicit query button and receive logging remain available.
 - Under `text_sensor`, expose `rf_state`, `position_source` and `transition_reason` separately. Use the [HA template](configs/ha-rssi-attributes.yaml) to combine them as RSSI attributes.
 
-YAML is authoritative; legacy NVS data is preserved. Up, down and STOP have been confirmed on the user's motor; tilt remains unverified.
+YAML is authoritative; legacy NVS data is preserved. Movement and the isolated STOP have worked on the user's motor. Repeated control and long-term reliability still need validation; tilt remains unverified.
