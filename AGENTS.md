@@ -9,6 +9,9 @@ The user prioritizes quick device debugging over exhaustive verification.
   fresh build trees/environments, or wait for CI on routine changes.
 - Compile once using the same YAML path/build directory when firmware is needed.
   Keep ESPHome's toolchain/build cache. Do not automatically clean it.
+- Use `python scripts/dev.py deploy` with the existing private local-source profile.
+  Compile on this PC and OTA directly; Git push/pull is not a deployment prerequisite.
+  `upload` reuses the compiled binary; `rollback` uploads the saved baseline without a build.
 - RF parameter experiments use the existing native API debug action, without OTA.
 - Commit and push to the current fork branch promptly; no new reports/checklists.
 - Preserve NVS rollback, STOP queue handling and basic RF argument validation.

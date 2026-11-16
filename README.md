@@ -13,6 +13,16 @@ external_components:
 
 `main` tracks the current code. Recompile and upload via OTA to apply updates.
 
+For local experiments, keep one private YAML using `external_components` with
+`source: {type: local, path: /path/to/this/repo/components}` and one fixed
+`esphome.build_path`. The ignored `config.dev.local.json` can store `python`
+(existing ESPHome interpreter), `config` (that YAML), and `device` (ESP address).
+Run `python scripts/dev.py deploy` to compile incrementally and upload directly;
+no Git push, remote pull or HA-side build is involved. `upload` skips compilation,
+and `--dry-run` previews commands. An optional `baseline` object with `config`,
+`file` (saved OTA binary), and `sha256` enables `python scripts/dev.py rollback`
+without recompiling. Keep credentials in the private YAML/secrets files.
+
 Start with the [example configuration](configs/raffstore.yaml). Set your Wi-Fi and API/OTA credentials, motor and remote addresses, and channel.
 
 - `state_strategy: timed`: estimates remaining travel from position, direction and full travel duration, then adds `endpoint_margin`. Unknown positions use full travel time. RF endpoint feedback takes precedence.

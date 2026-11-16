@@ -16,6 +16,7 @@ node_modules/
 
 # Dev config (contains credentials)
 config.dev.yaml
+config.dev.local.json
 configs/secrets.yaml
 
 # Logs
