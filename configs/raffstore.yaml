@@ -79,10 +79,10 @@ cover:
     close_duration: 0s
     endpoint_margin: 2s
     tilt: false
-    # Restore original frame families; long-travel motor acceptance still needs testing.
+    # Upstream full-travel commands use targeted receiver frames.
     commands:
-      up: {command: 0x21, type: 0x44, type2: 0x10, hop: 0x00}
-      down: {command: 0x41, type: 0x44, type2: 0x10, hop: 0x00}
+      up: {command: 0x21, type: 0x6A, type2: 0x10, hop: 0x00}
+      down: {command: 0x41, type: 0x6A, type2: 0x10, hop: 0x00}
       stop: {command: 0x10, type: 0x6A, destination: status}
       check: {command: 0x00, type: 0x6A, destination: status}
 
